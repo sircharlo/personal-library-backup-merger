@@ -1,0 +1,37 @@
+{
+  "name": "personal-library-backup-merger",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Client-side merger for JW Library .jwlibrary backups (notes, highlights, bookmarks, tags, playlists) with conflict resolution.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit -p tsconfig.app.json && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.app.json"
+  },
+  "dependencies": {
+    "@quasar/extras": "^2.0.4",
+    "diff": "^9.0.0",
+    "jszip": "^3.10.1",
+    "quasar": "^2.30.0",
+    "sql.js": "^1.14.2",
+    "vue": "^3.5.42"
+  },
+  "devDependencies": {
+    "@quasar/vite-plugin": "^2.0.2",
+    "@types/node": "^26.4.1",
+    "@types/sql.js": "^1.4.11",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "sass-embedded": "^1.104.0",
+    "typescript": "~5.9.3",
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0",
+    "vue-tsc": "^3.3.11"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

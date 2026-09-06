@@ -1,0 +1,32 @@
+# Personal JW Library backups — NEVER commit (contain personal Bible study notes)
+*.jwlibrary
+tests/manual/*.jwlibrary
+tests/manual/manual-smoke-test.md
+
+# Dependencies / build output
+node_modules/
+dist/
+dist-ssr/
+*.local
+.quasar/
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Vitest / coverage
+coverage/
+
+# Temp / scratch
+tmp/
+scratch/
+*.db
+*.db-journal
