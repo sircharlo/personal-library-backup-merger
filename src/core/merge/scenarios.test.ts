@@ -99,7 +99,7 @@ const S = {
       lastModified: '2026-09-06T14:54:00Z',
       rows: {
         Location: [R.bibleLoc(1, 43, 3)],
-        Note: [R.note({ NoteId: 1, Guid: 'shared-note', LocationId: 1, Content: 'Many reasons, but the Bible summed it all up', LastModified: '2024-01-02T10:00:00Z' })],
+        Note: [R.note({ NoteId: 1, Guid: 'shared-note', LocationId: 1, Content: 'Faith grows one verse at a time', LastModified: '2024-01-02T10:00:00Z' })],
       },
     },
     {
@@ -112,7 +112,7 @@ const S = {
             NoteId: 1,
             Guid: 'shared-note',
             LocationId: 1,
-            Content: 'How possible? \nMany reasons, but the Bible summed it all up',
+            Content: 'Why is that?\nFaith grows one verse at a time',
             LastModified: '2026-09-06T14:56:00Z',
           }),
         ],
@@ -195,7 +195,7 @@ const S = {
         PlaylistItemMarker: [R.marker({ PlaylistItemMarkerId: 1, PlaylistItemId: 2, StartTimeTicks: 100 })],
         PlaylistItemMarkerBibleVerseMap: [R.verseMap(1, 1001001)],
         PlaylistItemMarkerParagraphMap: [R.paragraphMap(1, 555, 3)],
-        Tag: [R.playlistTag(1, 'Powerful images')],
+        Tag: [R.playlistTag(1, 'Sample playlist')],
         TagMap: [R.tagMap({ TagMapId: 1, TagId: 1, PlaylistItemId: 1, Position: 0 }), R.tagMap({ TagMapId: 2, TagId: 1, PlaylistItemId: 2, Position: 1 })],
       },
       mediaFiles: { [PNG1]: R.bytes('PNG-1'), [MP4_2]: R.bytes('MP4-2') },
@@ -338,16 +338,16 @@ describe('scenario 3 — note conflict (real-world shaped)', () => {
     expect(c.context).toContain('nwtsty');
     expect(run.result.counts.Note).toBe(1);
     expect(run.result.counts.Location).toBe(1);
-    expect(run.result.tables.Note[0].Content).toBe('How possible? \nMany reasons, but the Bible summed it all up');
+    expect(run.result.tables.Note[0].Content).toBe('Why is that?\nFaith grows one verse at a time');
     expect(run.result.resolvedConflicts[0]).toMatchObject({ conflictId: c.id, winnerSourceIndex: 1, wasSuggested: true });
     await assertAllInvariants(run);
 
     const overridden = await runMerge(S.noteConflict(), new Map([[c.id, 0]]));
-    expect(overridden.result.tables.Note[0].Content).toBe('Many reasons, but the Bible summed it all up');
+    expect(overridden.result.tables.Note[0].Content).toBe('Faith grows one verse at a time');
     expect(overridden.result.resolvedConflicts[0]).toMatchObject({ winnerSourceIndex: 0, wasSuggested: false });
     const db = await openResultDb(overridden);
     try {
-      expect(queryScalar<string>(db, 'SELECT Content FROM Note')).toBe('Many reasons, but the Bible summed it all up');
+      expect(queryScalar<string>(db, 'SELECT Content FROM Note')).toBe('Faith grows one verse at a time');
     } finally {
       db.close();
     }
