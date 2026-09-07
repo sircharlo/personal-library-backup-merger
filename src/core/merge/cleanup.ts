@@ -2,11 +2,10 @@
  * Opt-in clean-ups applied to the merged tables (after conflict resolution, before the database is
  * built). Every removal is counted so validation can prove nothing else went missing.
  */
-import type { CleanupKey } from '../health/healthCheck';
+import { isEmptyNote, type CleanupKey } from '../health/healthCheck';
 import { DATA_TABLE_NAMES, type AllTables, type DataTableName, type TableCounts, type UserMarkRow } from '../jwlibrary/types';
 import { createLogger, fmtCount } from '../util/log';
 import { blockRangeSignature } from './identity';
-import { normalizeText } from './tables/mergeNote';
 
 export type CleanupOptions = Record<CleanupKey, boolean>;
 
@@ -56,9 +55,10 @@ export function applyCleanups(input: AllTables, mediaFiles: Map<string, Uint8Arr
   let files = mediaFiles;
 
   if (opts.emptyNotes) {
-    const gone = new Set(t.Note.filter((n) => normalizeText(n.Title) === '' && normalizeText(n.Content) === '').map((n) => n.NoteId));
+    // Tagged empty notes are deliberate markers and are never removed.
+    const tagged = new Set(t.TagMap.map((m) => m.NoteId).filter((id): id is number => id != null));
+    const gone = new Set(t.Note.filter((n) => isEmptyNote(n) && !tagged.has(n.NoteId)).map((n) => n.NoteId));
     t.Note = t.Note.filter((n) => !gone.has(n.NoteId));
-    t.TagMap = t.TagMap.filter((m) => m.NoteId == null || !gone.has(m.NoteId));
     summary.emptyNotes = gone.size;
   }
 

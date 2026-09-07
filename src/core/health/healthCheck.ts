@@ -212,12 +212,16 @@ export function checkHealth(t: AllTables, mediaFileNames?: Iterable<string>): He
     },
     { info: true },
   );
+  // An empty note that carries a tag is a deliberate marker (a tag used as a bookmark), not junk.
+  const taggedNotes = new Set(t.TagMap.map((m) => m.NoteId).filter((id): id is number => id != null));
   check(
     'B8',
     'unreferenced',
-    'notes with no title and no content',
+    'notes with no title, no content and no tag',
     (b) => {
-      for (const n of t.Note) if (normalizeText(n.Title) === '' && normalizeText(n.Content) === '') b.hit(() => `note #${n.NoteId} at ${desc(n.LocationId)}`);
+      for (const n of t.Note) {
+        if (isEmptyNote(n) && !taggedNotes.has(n.NoteId)) b.hit(() => `note #${n.NoteId} at ${desc(n.LocationId)}`);
+      }
     },
     { cleanup: 'emptyNotes' },
   );
@@ -317,6 +321,10 @@ export function checkHealth(t: AllTables, mediaFileNames?: Iterable<string>): He
   const nonZero = findings.filter((f) => f.count > 0);
   log.debug(`health: ${findings.length} checks, ${nonZero.length} with findings in ${fmtMs(performance.now() - t0)}`, Object.fromEntries(nonZero.map((f) => [f.code, f.count])));
   return { findings, checks: findings.length, problemCount };
+}
+
+export function isEmptyNote(n: { Title: string | null; Content: string | null }): boolean {
+  return normalizeText(n.Title) === '' && normalizeText(n.Content) === '';
 }
 
 export function findingByCleanup(report: HealthReport | null | undefined, cleanup: CleanupKey): HealthFinding | undefined {

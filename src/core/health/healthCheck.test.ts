@@ -39,6 +39,7 @@ function messySpec(): FixtureSpec {
         R.note({ NoteId: 4, Guid: 'n4', LocationId: 3, Content: '  ' }), // empty
         R.note({ NoteId: 5, Guid: 'n5', LocationId: 98, Content: 'secret five' }), // missing location
         R.note({ NoteId: 6, Guid: 'n6', LocationId: 1, UserMarkId: 66, Content: 'secret six' }), // missing highlight
+        R.note({ NoteId: 7, Guid: 'n7', LocationId: 1, Content: '' }), // empty but tagged: a marker, not B8
       ],
       Bookmark: [
         R.bookmark({ BookmarkId: 1, LocationId: 1, PublicationLocationId: 5, Slot: 0 }), // nwtsty chapter filed under 'w'
@@ -51,6 +52,7 @@ function messySpec(): FixtureSpec {
         R.tagMap({ TagMapId: 2, TagId: 1, NoteId: 555, Position: 1 }), // deleted note
         R.tagMap({ TagMapId: 3, TagId: 9, NoteId: 3, Position: 0 }), // missing tag
         R.tagMap({ TagMapId: 4, TagId: 3, PlaylistItemId: 1, Position: 0 }),
+        R.tagMap({ TagMapId: 5, TagId: 1, NoteId: 7, Position: 2 }),
       ],
       IndependentMedia: [
         R.media({ IndependentMediaId: 1, FilePath: USED, Hash: 'h1' }),
@@ -105,6 +107,7 @@ describe('health check', () => {
     // Samples describe rows, never note text.
     expect(JSON.stringify(report)).not.toMatch(/secret/);
     expect(report.findings.find((f) => f.code === 'B1')!.samples[0]).toContain('nwtsty');
+    expect(report.findings.find((f) => f.code === 'B8')!.samples).toEqual(['note #4 at w · doc 3001']);
     expect(report.findings.find((f) => f.code === 'C4')!.cleanup).toBe('duplicateHighlights');
     expect(report.findings.find((f) => f.code === 'C5')!.info).toBe(true);
   });

@@ -33,7 +33,7 @@ const CLEANUPS: { key: CleanupKey; label: string; desc: string }[] = [
   { key: 'duplicateHighlights', label: 'Merge exact duplicate highlights', desc: 'Same passage, same ranges, same colour — the copy that carries notes is kept.' },
   { key: 'unusedMedia', label: 'Drop media used by no playlist item', desc: 'Shrinks the backup; nothing in the app refers to these files.' },
   { key: 'rangelessHighlights', label: 'Remove invisible highlights', desc: 'Highlights without a highlighted range; their notes stay on the location.' },
-  { key: 'emptyNotes', label: 'Remove empty notes', desc: 'No title and no content. Off by default in case they are placeholders.' },
+  { key: 'emptyNotes', label: 'Remove empty, untagged notes', desc: 'No title, no content and no tag. Tagged empty notes are kept (a tag used as a bookmark). Off by default.' },
 ];
 const cleanupRows = computed(() => CLEANUPS.map((c) => ({ ...c, count: findingByCleanup(mergedHealth.value, c.key)?.count ?? 0 })));
 
