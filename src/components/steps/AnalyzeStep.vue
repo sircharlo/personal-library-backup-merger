@@ -65,6 +65,7 @@ const autoTiles = computed(() => {
   add(a.mediaDeduped, 'identical media files merged', I.permMedia);
   add(a.mediaRenamed, 'media files renamed to avoid a clash', I.driveFileRename);
   add(a.locationsDeduped, 'publication references merged', I.menuBook);
+  add(a.locationTitlesNormalized, 'empty location titles made Windows-compatible', I.driveFileRename);
   return tiles;
 });
 </script>

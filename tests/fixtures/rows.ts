@@ -32,7 +32,8 @@ export const loc = (o: With<LocationRow, 'LocationId'>): LocationRow => ({
   KeySymbol: null,
   MepsLanguage: 0,
   Type: 0,
-  Title: null,
+  // Real backups store a single space for "no title" (iOS occasionally NULL — covered by its own test).
+  Title: ' ',
   Specialty: null,
   Edition: null,
   ...o,

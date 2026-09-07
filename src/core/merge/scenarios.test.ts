@@ -613,6 +613,39 @@ describe('keep both versions', () => {
   });
 });
 
+describe('location titles', () => {
+  it('NULL titles are written as empty strings (Windows backlink quirk) and real titles win over blanks', async () => {
+    const specs: FixtureSpec[] = [
+      {
+        deviceName: 'iPhone',
+        rows: {
+          Location: [R.docLoc(1, 5001, 'mwb', { Title: null }), R.docLoc(2, 5002, 'w', { Title: null }), R.bibleLoc(3, 2, 19, { Title: ' ' })],
+          Note: [R.note({ NoteId: 1, Guid: 'n1', LocationId: 1, Content: 'workbook note' })],
+        },
+      },
+      {
+        deviceName: 'Desktop',
+        rows: { Location: [R.docLoc(1, 5002, 'w', { Title: 'Study Article' }), R.bibleLoc(2, 2, 19, { Title: ' ' })] },
+      },
+    ];
+    const run = await runMerge(specs);
+    const byDoc = (id: number) => run.result.tables.Location.find((l) => l.DocumentId === id)!;
+    expect(byDoc(5001).Title).toBe(' ');
+    expect(byDoc(5002).Title).toBe('Study Article');
+    expect(run.result.tables.Location.find((l) => l.BookNumber === 2)!.Title).toBe(' ');
+    expect(run.result.tables.Location.every((l) => l.Title !== null)).toBe(true);
+    expect(run.analysis.auto.locationTitlesNormalized).toBe(1);
+    await assertAllInvariants(run);
+
+    const db = await openResultDb(run);
+    try {
+      expect(queryScalar<number>(db, 'SELECT count(*) FROM Location WHERE Title IS NULL')).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe('whitespace-only differences are not conflicts', () => {
   it('a trailing newline / CRLF in a note merges to the newest copy', async () => {
     const specs: FixtureSpec[] = [

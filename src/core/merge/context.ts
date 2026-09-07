@@ -13,6 +13,8 @@ import { GlobalIdAllocator, MultiKeyIndex, SourceIdMaps, type LocalKey } from '.
 /** Counts of everything the engine resolved on its own (never shown as user conflicts). */
 export interface AutoResolutionSummary {
   locationsDeduped: number;
+  /** NULL `Location.Title` rows written as '' so the Windows app can build note backlinks. */
+  locationTitlesNormalized: number;
   userMarksDeduped: number;
   blockRangesDeduped: number;
   notesDeduped: number;
@@ -32,6 +34,7 @@ export interface AutoResolutionSummary {
 export function emptyAutoSummary(): AutoResolutionSummary {
   return {
     locationsDeduped: 0,
+    locationTitlesNormalized: 0,
     userMarksDeduped: 0,
     blockRangesDeduped: 0,
     notesDeduped: 0,
