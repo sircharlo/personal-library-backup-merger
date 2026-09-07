@@ -8,7 +8,7 @@ export default defineConfig({
   base: '/personal-library-backup-merger/',
   plugins: [
     vue({ template: { transformAssetUrls } }),
-    quasar({ autoImportComponentCase: 'pascal' }),
+    quasar({ autoImportComponentCase: 'combined' }),
   ],
   resolve: {
     alias: {

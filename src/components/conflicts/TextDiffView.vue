@@ -15,23 +15,27 @@ const parts = computed(() => diffWords(props.from ?? '', props.to ?? ''));
 <style scoped>
 .diff {
   white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 0.92rem;
-  line-height: 1.5;
-  border: 1px solid #e0e4ea;
-  border-radius: 6px;
-  padding: 8px 10px;
-  background: #fff;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.6;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-2);
 }
 .diff__add {
-  background: #d9f2df;
-  color: #1c5a2e;
-  border-radius: 2px;
+  background: rgba(52, 211, 153, 0.22);
+  color: #a7f3d0;
+  border-radius: 3px;
+  padding: 0 1px;
 }
 .diff__del {
-  background: #f9dada;
-  color: #8a1f1f;
+  background: rgba(251, 113, 133, 0.2);
+  color: #fecdd3;
   text-decoration: line-through;
-  border-radius: 2px;
+  text-decoration-color: rgba(254, 205, 211, 0.6);
+  border-radius: 3px;
+  padding: 0 1px;
 }
 </style>

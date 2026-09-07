@@ -25,6 +25,12 @@ npm-debug.log*
 # Vitest / coverage
 coverage/
 
+# Playwright
+e2e/.fixtures/
+test-results/
+playwright-report/
+blob-report/
+
 # Temp / scratch
 tmp/
 scratch/

@@ -3,6 +3,8 @@ import { conflictIdFor, pickSuggestedWinner, type Conflict, type ConflictCandida
 import { labelOf, mapId, warn, type MergeContext } from '../context';
 import { describeLocation } from '../describe';
 import { inputFieldKey, localRowKey } from '../identity';
+import { compareTimestamps } from '../../util/datetime';
+import { normalizeText } from './mergeNote';
 
 interface Copy {
   sourceIndex: number;
@@ -36,10 +38,15 @@ export function mergeInputField(ctx: MergeContext): void {
   }
 
   for (const [key, copies] of groups) {
-    const distinct = new Set(copies.map((c) => c.row.Value));
+    const distinct = new Set(copies.map((c) => normalizeText(c.row.Value)));
     if (distinct.size === 1) {
-      ctx.merged.InputField.push(copies[0].row);
-      copies.forEach((c, i) => ctx.idMaps[c.sourceIndex].set('InputField', c.localKey, { kind: 'mapped', globalId: key, mergedInto: i > 0 }));
+      // Whitespace-only differences are not edits; keep the exact bytes of the most recently modified backup.
+      let winner = copies[0];
+      for (const c of copies) {
+        if (compareTimestamps(ctx.sources[c.sourceIndex].lastModified, ctx.sources[winner.sourceIndex].lastModified) > 0) winner = c;
+      }
+      ctx.merged.InputField.push(winner.row);
+      copies.forEach((c) => ctx.idMaps[c.sourceIndex].set('InputField', c.localKey, { kind: 'mapped', globalId: key, mergedInto: c !== winner }));
       ctx.auto.inputFieldsDeduped += copies.length - 1;
       continue;
     }

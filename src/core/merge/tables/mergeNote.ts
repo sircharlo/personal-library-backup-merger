@@ -11,6 +11,15 @@ interface Copy {
   row: NoteRow;
 }
 
+/** Whitespace-insensitive form: line endings, runs of spaces/tabs and line-edge blanks are not edits. */
+export function normalizeText(s: string | null | undefined): string {
+  return (s ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t ]+/g, ' ')
+    .replace(/ ?\n ?/g, '\n')
+    .trim();
+}
+
 /**
  * Stage 5 — Note, deduplicated by `Guid` with UserMark + Location remapped.
  * Conflict when `Content` / `Title` differ; suggested winner = later `LastModified`.
@@ -43,7 +52,8 @@ export function mergeNote(ctx: MergeContext): void {
       return { sourceIndex: m.sourceIndex, localId: m.row.NoteId, row: { ...m.row, NoteId: id, UserMarkId: userMarkId, LocationId: locationId } };
     });
 
-    const distinct = new Set(copies.map((c) => keyOf([c.row.Title, c.row.Content])));
+    // Whitespace-only differences (trailing newlines, CRLF) are not real edits; the newest copy's exact bytes are kept.
+    const distinct = new Set(copies.map((c) => keyOf([normalizeText(c.row.Title), normalizeText(c.row.Content)])));
     if (distinct.size === 1) {
       let winner = copies[0];
       for (let i = 1; i < copies.length; i++) {

@@ -15,6 +15,7 @@ import {
   FIXED_NOW,
 } from '../../../tests/fixtures/harness';
 import * as R from '../../../tests/fixtures/rows';
+import { KEEP_BOTH } from './conflicts';
 import { emptyAutoSummary } from './context';
 import { queryScalar } from '../jwlibrary/sqlite';
 import { DATA_TABLE_NAMES } from '../jwlibrary/types';
@@ -556,6 +557,94 @@ describe('scenario 12 — three backups', () => {
     const overridden = await runMerge(S.threeWay(), new Map([[c.id, 2]]));
     expect(overridden.result.tables.Note[0].Content).toBe('v3');
     await assertAllInvariants(overridden);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Keep both versions (the no-loss escape hatch) + whitespace-insensitive matching
+// ---------------------------------------------------------------------------
+
+const GUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+describe('keep both versions', () => {
+  it('note conflict: every version survives as its own note', async () => {
+    const analysed = await runMerge(S.noteConflict());
+    const c = analysed.analysis.conflicts[0];
+    const run = await runMerge(S.noteConflict(), new Map([[c.id, KEEP_BOTH]]));
+    expect(run.result.counts.Note).toBe(2);
+    const notes = run.result.tables.Note;
+    expect(notes.map((n) => n.Content).sort()).toEqual(['Faith grows one verse at a time', 'Why is that?\nFaith grows one verse at a time']);
+    expect(new Set(notes.map((n) => n.Guid)).size).toBe(2);
+    const original = notes.find((n) => n.Guid === 'shared-note')!;
+    const copy = notes.find((n) => n.Guid !== 'shared-note')!;
+    expect(copy.Guid).toMatch(GUID_V4);
+    expect(copy.LocationId).toBe(original.LocationId);
+    expect(copy.NoteId).not.toBe(original.NoteId);
+    expect(run.result.resolvedConflicts[0]).toMatchObject({ keptBoth: true, winnerSourceIndex: c.suggestedWinnerIndex, wasSuggested: true });
+    await assertAllInvariants(run);
+
+    // Deterministic: the same decision always produces the same GUID for the copy.
+    const again = await runMerge(S.noteConflict(), new Map([[c.id, KEEP_BOTH]]));
+    expect(again.result.tables.Note.map((n) => n.Guid).sort()).toEqual(notes.map((n) => n.Guid).sort());
+  });
+
+  it('highlight conflict: both highlights and all of their ranges survive', async () => {
+    const analysed = await runMerge(S.userMarkConflict());
+    const c = analysed.analysis.conflicts[0];
+    const totalRanges = c.candidates.reduce((n, cand) => n + (cand.children?.length ?? 0), 0);
+    const run = await runMerge(S.userMarkConflict(), new Map([[c.id, KEEP_BOTH]]));
+    expect(run.result.counts.UserMark).toBe(analysed.analysis.merged.UserMark.length + 2);
+    expect(run.result.counts.BlockRange).toBe(analysed.analysis.merged.BlockRange.length + totalRanges);
+    const marks = run.result.tables.UserMark;
+    expect(new Set(marks.map((u) => u.UserMarkGuid)).size).toBe(marks.length);
+    expect(marks.some((u) => u.UserMarkGuid === 'um-x')).toBe(true);
+    expect(marks.filter((u) => u.UserMarkGuid !== 'um-x').every((u) => GUID_V4.test(u.UserMarkGuid))).toBe(true);
+    for (const b of run.result.tables.BlockRange) expect(marks.some((u) => u.UserMarkId === b.UserMarkId)).toBe(true);
+    await assertAllInvariants(run);
+  });
+
+  it('input fields cannot keep both: the value falls back to the suggestion', async () => {
+    const analysed = await runMerge(S.inputFieldConflict());
+    const c = analysed.analysis.conflicts[0];
+    const run = await runMerge(S.inputFieldConflict(), new Map([[c.id, KEEP_BOTH]]));
+    expect(run.result.counts.InputField).toBe(1);
+    expect(run.result.resolvedConflicts[0]).toMatchObject({ keptBoth: false, wasSuggested: true });
+    await assertAllInvariants(run);
+  });
+});
+
+describe('whitespace-only differences are not conflicts', () => {
+  it('a trailing newline / CRLF in a note merges to the newest copy', async () => {
+    const specs: FixtureSpec[] = [
+      {
+        deviceName: 'iPhone',
+        lastModified: '2026-01-01T00:00:00Z',
+        rows: { Location: [R.bibleLoc(1, 1, 1)], Note: [R.note({ NoteId: 1, Guid: 'n', LocationId: 1, Title: 'T', Content: 'same text\r\n', LastModified: '2026-01-01T00:00:00Z' })] },
+      },
+      {
+        deviceName: 'iPad',
+        lastModified: '2026-02-01T00:00:00Z',
+        rows: { Location: [R.bibleLoc(1, 1, 1)], Note: [R.note({ NoteId: 1, Guid: 'n', LocationId: 1, Title: 'T ', Content: 'same text', LastModified: '2026-02-01T00:00:00Z' })] },
+      },
+    ];
+    const run = await runMerge(specs);
+    expect(run.analysis.conflicts).toEqual([]);
+    expect(run.result.counts.Note).toBe(1);
+    expect(run.result.tables.Note[0].Content).toBe('same text');
+    expect(run.analysis.auto.notesDeduped).toBe(1);
+    await assertAllInvariants(run);
+  });
+
+  it('padded input-field values merge to the most recently modified backup', async () => {
+    const specs: FixtureSpec[] = [
+      { deviceName: 'iPhone', lastModified: '2026-06-01T00:00:00Z', rows: { Location: [R.docLoc(1, 1001)], InputField: [R.inputField(1, 'q1', ' answer ')] } },
+      { deviceName: 'iPad', lastModified: '2026-01-01T00:00:00Z', rows: { Location: [R.docLoc(1, 1001)], InputField: [R.inputField(1, 'q1', 'answer')] } },
+    ];
+    const run = await runMerge(specs);
+    expect(run.analysis.conflicts).toEqual([]);
+    expect(run.result.tables.InputField[0].Value).toBe(' answer ');
+    expect(run.analysis.auto.inputFieldsDeduped).toBe(1);
+    await assertAllInvariants(run);
   });
 });
 

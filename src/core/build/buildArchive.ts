@@ -3,9 +3,12 @@ import { writeJwlibraryZip } from '../jwlibrary/zip';
 import type { MergeAnalysis } from '../merge/analyze';
 import type { MergeResult } from '../merge/finalize';
 import { formatSqliteUtc } from '../util/datetime';
+import { createLogger, fmtBytes } from '../util/log';
 import { validateDatabaseBytes, type ValidationReport } from '../validate/integrityCheck';
 import { buildDatabase } from './buildDatabase';
 import { buildManifestForDb } from './buildManifest';
+
+export type BuildPhase = 'database' | 'validate' | 'manifest' | 'zip' | 'done';
 
 export interface BuildArchiveInput {
   analysis: MergeAnalysis;
@@ -18,6 +21,7 @@ export interface BuildArchiveInput {
   now?: Date;
   /** Override the `LastModified` written to the db (defaults to `now` in SQLite's UTC format). */
   lastModified?: string;
+  onPhase?: (phase: BuildPhase) => void;
 }
 
 export interface BuildArchiveOutput {
@@ -31,14 +35,21 @@ export interface BuildArchiveOutput {
   mediaFileCount: number;
 }
 
+const log = createLogger('build');
+
 /** Build db → validate → manifest (self-computed hash) → zip. */
 export async function buildArchive(input: BuildArchiveInput): Promise<BuildArchiveOutput> {
   const { analysis, result } = input;
+  const phase = (p: BuildPhase) => input.onPhase?.(p);
   const now = input.now ?? new Date();
   const lastModified = input.lastModified ?? formatSqliteUtc(now);
   const deviceName = input.deviceName?.trim() || defaultDeviceName(analysis.sources.length);
   const fileName = input.fileName?.trim() || defaultFileName(now);
+  const total = log.time(`built ${fileName}`);
+  log.info(`building ${fileName} · device "${deviceName}" · schema v${analysis.schemaVersion} · template ${analysis.grdbMigrationIdentifier || '?'}`);
 
+  phase('database');
+  const tDb = log.time('build sqlite database');
   const db = await buildDatabase(result.tables, {
     template: analysis.templateSchema,
     lastModified,
@@ -51,8 +62,19 @@ export async function buildArchive(input: BuildArchiveInput): Promise<BuildArchi
   } finally {
     db.close();
   }
+  tDb(fmtBytes(dbBytes.byteLength));
 
+  phase('validate');
+  const tValidate = log.time('validate');
   const validation = await validateDatabaseBytes(dbBytes, analysis.sourceCounts, result.counts);
+  tValidate(
+    `fk violations ${validation.foreignKeyViolations}, integrity ${validation.integrityCheck}, re-open ${validation.reopen.ok ? 'ok' : 'FAILED'}, ${validation.errors.length} error(s), ${validation.warnings.length} warning(s)`,
+  );
+  if (!validation.ok) log.error('validation FAILED', validation.errors);
+  for (const w of validation.warnings) log.warn(w);
+
+  phase('manifest');
+  const tManifest = log.time('manifest + sha256');
   const { manifest, dbHash } = await buildManifestForDb({
     dbBytes,
     fileName,
@@ -61,13 +83,19 @@ export async function buildArchive(input: BuildArchiveInput): Promise<BuildArchi
     lastModified,
     now,
   });
+  tManifest(`sha256 ${dbHash.slice(0, 12)}…`);
 
+  phase('zip');
+  const tZip = log.time('zip');
   const bytes = await writeJwlibraryZip({
     manifest,
     dbBytes,
     mediaFiles: analysis.mediaFiles,
     defaultThumbnail: analysis.defaultThumbnail,
   });
+  tZip(`${fmtBytes(bytes.byteLength)} · ${analysis.mediaFiles.size} media files`);
+  phase('done');
+  total();
 
   return { bytes, fileName, manifest, dbBytes, dbHash, lastModified, validation, mediaFileCount: analysis.mediaFiles.size };
 }

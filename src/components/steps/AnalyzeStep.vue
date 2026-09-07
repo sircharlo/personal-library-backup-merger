@@ -1,147 +1,345 @@
 <script setup lang="ts">
+import { I } from '@/icons';
 import { computed } from 'vue';
-import { useMergeWizard, type WizardFile } from '@/composables/useMergeWizard';
+import { useMergeWizard } from '@/composables/useMergeWizard';
 import { formatBytes, formatTimestamp, plural } from '@/utils/format';
+import { deviceIcon, deviceKind, statChips } from '@/utils/display';
 
-const { files, analyzing, analysis, analysisError, compatibility, conflictCounts, conflicts, removeFileAndReanalyze, goTo, continueFromAnalyze } =
+const { files, analyzing, analysisProgress, analysis, analysisError, compatibility, conflictCounts, conflicts, hasConflicts, removeFileAndReanalyze, goTo, continueFromAnalyze } =
   useMergeWizard();
 
-const okCount = computed(() => files.value.filter((f) => f.status === 'ok').length);
-const errorCount = computed(() => files.value.filter((f) => f.status === 'error').length);
+const STAGE_LABELS: Record<string, string> = {
+  Location: 'Matching publications and chapters',
+  UserMark: 'Matching highlights',
+  IndependentMedia: 'Matching media files',
+  BlockRange: 'Matching highlighted ranges',
+  Note: 'Matching notes',
+  Bookmark: 'Matching bookmarks',
+  InputField: 'Matching input fields',
+  Tag: 'Matching tags and playlists',
+  PlaylistItemAccuracy: 'Matching playlist settings',
+  PlaylistItem: 'Matching playlist items',
+  TagMap: 'Ordering tags and playlists',
+};
 
-function chips(f: WizardFile) {
-  const s = f.summary;
-  if (!s) return [];
-  const c = s.counts;
-  return [
-    { icon: 'sticky_note_2', label: plural(c.Note, 'note') },
-    { icon: 'border_color', label: plural(c.UserMark, 'highlight') },
-    { icon: 'bookmark', label: plural(c.Bookmark, 'bookmark') },
-    { icon: 'label', label: plural(c.Tag - s.playlistCount, 'tag') },
-    { icon: 'playlist_play', label: `${plural(s.playlistCount, 'playlist')} · ${plural(c.PlaylistItem, 'item')}` },
-    { icon: 'perm_media', label: plural(s.mediaFileCount, 'media file') },
-    { icon: 'edit_note', label: plural(c.InputField, 'input field') },
-  ];
+const stageLabel = computed(() => {
+  const p = analysisProgress.value;
+  if (!p) return 'Preparing…';
+  return STAGE_LABELS[p.stage] ?? p.stage;
+});
+const stageFraction = computed(() => {
+  const p = analysisProgress.value;
+  return p ? (p.index + 1) / p.total : 0.05;
+});
+
+const okFiles = computed(() => files.value.filter((f) => f.status === 'ok'));
+const errorFiles = computed(() => files.value.filter((f) => f.status === 'error'));
+
+function chips(counts: NonNullable<(typeof okFiles.value)[number]['summary']>) {
+  return statChips(counts.counts, counts.playlistCount, counts.mediaFileCount).filter((c) => c.value > 0);
 }
 
-const autoLines = computed(() => {
+const conflictBreakdown = computed(() => {
+  const parts: string[] = [];
+  if (conflictCounts.value.note) parts.push(plural(conflictCounts.value.note, 'note'));
+  if (conflictCounts.value.inputField) parts.push(plural(conflictCounts.value.inputField, 'input field'));
+  if (conflictCounts.value.userMark) parts.push(plural(conflictCounts.value.userMark, 'highlight'));
+  return parts.join(', ');
+});
+
+const autoTiles = computed(() => {
   const a = analysis.value?.auto;
   if (!a) return [];
-  const lines: string[] = [];
-  const add = (n: number, text: string) => n > 0 && lines.push(`${n.toLocaleString()} ${text}`);
-  add(a.notesDeduped, 'identical notes merged');
-  add(a.userMarksDeduped, 'identical highlights merged');
-  add(a.bookmarksDeduped, 'identical bookmarks merged');
-  add(a.bookmarksRenumbered, 'bookmarks moved to a free slot');
-  add(a.inputFieldsDeduped, 'identical input fields merged');
-  add(a.tagsMerged, 'tags merged by name');
-  add(a.playlistsMergedByName, 'playlists merged by name');
-  add(a.tagMapsDeduped, 'duplicate tag assignments merged');
-  add(a.tagPositionsRenumbered, 'tag/playlist positions renumbered');
-  add(a.playlistItemsDeduped, 'identical playlist items merged');
-  add(a.mediaDeduped, 'identical media files merged');
-  add(a.mediaRenamed, 'media files renamed to avoid a name clash');
-  add(a.locationsDeduped, 'publication/chapter references merged');
-  return lines;
+  const tiles: { n: number; label: string; icon: string }[] = [];
+  const add = (n: number, label: string, icon: string) => n > 0 && tiles.push({ n, label, icon });
+  add(a.notesDeduped, 'identical notes merged', I.stickyNote2);
+  add(a.userMarksDeduped, 'identical highlights merged', I.formatInkHighlighter);
+  add(a.bookmarksDeduped, 'identical bookmarks merged', I.bookmark);
+  add(a.bookmarksRenumbered, 'bookmarks moved to a free slot', I.swapVert);
+  add(a.inputFieldsDeduped, 'identical input fields merged', I.editNote);
+  add(a.tagsMerged, 'tags merged by name', I.label);
+  add(a.playlistsMergedByName, 'playlists merged by name', I.playlistPlay);
+  add(a.tagMapsDeduped, 'duplicate tag assignments merged', I.join);
+  add(a.tagPositionsRenumbered, 'tag & playlist positions renumbered', I.formatListNumbered);
+  add(a.playlistItemsDeduped, 'identical playlist items merged', I.queueMusic);
+  add(a.mediaDeduped, 'identical media files merged', I.permMedia);
+  add(a.mediaRenamed, 'media files renamed to avoid a clash', I.driveFileRename);
+  add(a.locationsDeduped, 'publication references merged', I.menuBook);
+  return tiles;
 });
 </script>
 
 <template>
-  <div class="column q-gutter-md">
-    <div>
-      <div class="text-h6">Reading your backups</div>
-      <div class="text-body2 text-grey-8">Each file is opened locally, checked for compatibility, and compared row by row.</div>
+  <div class="step">
+    <header class="step__head">
+      <h2 class="h-step">{{ analyzing ? 'Comparing your backups' : analysis ? "Here's what we found" : 'Comparison' }}</h2>
+      <p class="text-2">Every note, highlight, bookmark, tag and playlist is matched across devices. Only things edited differently on two devices need a decision.</p>
+    </header>
+
+    <div v-if="analyzing" class="progress">
+      <div class="progress__row">
+        <q-spinner-puff size="28px" />
+        <div class="progress__text">
+          <div class="progress__title">{{ stageLabel }}</div>
+          <div class="text-3 progress__sub">Step {{ (analysisProgress?.index ?? 0) + 1 }} of {{ analysisProgress?.total ?? 11 }} · running in a background thread</div>
+        </div>
+      </div>
+      <q-linear-progress :value="stageFraction" size="6px" rounded animation-speed="300" class="progress__bar" />
     </div>
 
-    <div class="row q-col-gutter-md">
-      <div v-for="f in files" :key="f.id" class="col-12 col-md-6">
-        <q-card flat bordered class="full-height">
-          <q-card-section class="row items-center no-wrap q-pb-none">
-            <q-spinner v-if="f.status === 'parsing'" color="primary" size="24px" class="q-mr-sm" />
-            <q-icon v-else-if="f.status === 'ok'" name="check_circle" color="positive" size="24px" class="q-mr-sm" />
-            <q-icon v-else-if="f.status === 'error'" name="error" color="negative" size="24px" class="q-mr-sm" />
-            <q-icon v-else name="schedule" color="grey-6" size="24px" class="q-mr-sm" />
-            <div class="col ellipsis">
-              <div class="text-subtitle1">{{ f.summary?.deviceName ?? f.name }}</div>
-              <div class="text-caption text-grey-7 ellipsis">{{ f.name }} · {{ formatBytes(f.size) }}</div>
-            </div>
-          </q-card-section>
-
-          <q-card-section v-if="f.status === 'error'">
-            <q-banner rounded dense class="bg-red-1 text-red-10">
-              {{ f.error }}
-              <template #action>
-                <q-btn flat dense no-caps color="negative" label="Remove this file and continue" @click="removeFileAndReanalyze(f.id)" />
-              </template>
-            </q-banner>
-          </q-card-section>
-
-          <q-card-section v-else-if="f.summary" class="q-pt-sm">
-            <div class="q-gutter-xs q-mb-sm">
-              <q-badge color="primary" outline>schema v{{ f.summary.schemaVersion }}</q-badge>
-              <q-badge color="grey-7" outline>migration {{ f.summary.grdbMigrationIdentifier || '?' }}</q-badge>
-              <q-badge color="grey-7" outline>{{ f.summary.triggerCount }} triggers</q-badge>
-              <q-badge color="grey-7" outline>last modified {{ formatTimestamp(f.summary.lastModified) }}</q-badge>
-            </div>
-            <div class="row q-gutter-xs">
-              <q-chip v-for="c in chips(f)" :key="c.label" dense size="sm" :icon="c.icon" class="bg-grey-2">{{ c.label }}</q-chip>
-            </div>
-          </q-card-section>
-        </q-card>
+    <div v-else-if="analysisError" class="callout callout--rose">
+      <div class="callout__icon"><q-icon :name="I.block" /></div>
+      <div>
+        <div class="callout__title">These backups cannot be merged</div>
+        <div class="callout__body">{{ analysisError }}</div>
       </div>
     </div>
 
-    <q-banner v-if="analysisError" rounded class="bg-red-1 text-red-10">
-      <template #avatar><q-icon name="block" color="negative" /></template>
-      <div class="text-subtitle2">These backups cannot be merged</div>
-      <div>{{ analysisError }}</div>
-    </q-banner>
-
-    <q-card v-else-if="analysis" flat bordered>
-      <q-card-section>
-        <div class="text-subtitle1">
-          <q-icon name="fact_check" color="positive" class="q-mr-xs" />
-          {{ plural(okCount, 'backup') }} compared
-          <span v-if="errorCount" class="text-negative"> · {{ plural(errorCount, 'file') }} could not be read and will be left out</span>
+    <template v-else-if="analysis">
+      <div class="callout" :class="hasConflicts ? 'callout--amber' : 'callout--mint'">
+        <div class="callout__icon"><q-icon :name="hasConflicts ? I.altRoute : I.taskAlt" /></div>
+        <div>
+          <div class="callout__title">
+            <template v-if="hasConflicts">{{ plural(conflicts.length, 'item') }} need{{ conflicts.length === 1 ? 's' : '' }} your decision</template>
+            <template v-else>Everything merged cleanly</template>
+          </div>
+          <div class="callout__body">
+            <template v-if="hasConflicts">{{ conflictBreakdown }} — edited differently on two or more devices. The most recent version is pre-selected for each.</template>
+            <template v-else>Nothing was edited differently on two devices, so there is nothing to decide.</template>
+          </div>
         </div>
-        <div class="q-mt-sm">
-          <template v-if="conflicts.length">
-            <q-icon name="call_merge" color="warning" class="q-mr-xs" />
-            <strong>{{ plural(conflicts.length, 'conflict') }}</strong> need a decision:
-            <span v-if="conflictCounts.note">{{ plural(conflictCounts.note, 'note') }}</span>
-            <span v-if="conflictCounts.inputField">, {{ plural(conflictCounts.inputField, 'input field') }}</span>
-            <span v-if="conflictCounts.userMark">, {{ plural(conflictCounts.userMark, 'highlight') }}</span>
-            — each one is pre-selected with the most recently modified version.
-          </template>
-          <template v-else>
-            <q-icon name="thumb_up" color="positive" class="q-mr-xs" />
-            No conflicts — nothing was edited differently on two devices.
-          </template>
+      </div>
+    </template>
+
+    <section v-if="okFiles.length || errorFiles.length" class="devices">
+      <h3 class="h-section">Backups compared</h3>
+      <div class="devices__grid">
+        <article v-for="f in okFiles" :key="f.id" class="device">
+          <div class="device__head">
+            <div class="device__icon"><q-icon :name="deviceIcon(deviceKind(f.summary?.deviceName))" /></div>
+            <div class="device__title">
+              <div class="device__name">{{ f.summary?.deviceName }}</div>
+              <div class="device__meta text-3">{{ f.name }} · {{ formatBytes(f.size) }}</div>
+            </div>
+          </div>
+          <div class="device__pills">
+            <span class="pill">Last change {{ formatTimestamp(f.summary?.lastModified) }}</span>
+            <span class="pill pill--violet">schema v{{ f.summary?.schemaVersion }} · {{ f.summary?.grdbMigrationIdentifier || '?' }}</span>
+          </div>
+          <div v-if="f.summary" class="device__stats">
+            <span v-for="c in chips(f.summary)" :key="c.label" class="stat"><q-icon :name="c.icon" />{{ c.label }}</span>
+          </div>
+        </article>
+        <article v-for="f in errorFiles" :key="f.id" class="device device--error">
+          <div class="device__head">
+            <div class="device__icon"><q-icon :name="I.error" /></div>
+            <div class="device__title">
+              <div class="device__name">{{ f.name }}</div>
+              <div class="device__meta text-3">{{ formatBytes(f.size) }} · could not be read</div>
+            </div>
+          </div>
+          <div class="device__error">{{ f.error }}</div>
+          <q-btn flat no-caps dense class="btn-link self-start" :icon="I.delete" label="Leave this file out" @click="removeFileAndReanalyze(f.id)" />
+        </article>
+      </div>
+    </section>
+
+    <section v-if="autoTiles.length" class="auto">
+      <h3 class="h-section">Handled automatically</h3>
+      <div class="auto__grid">
+        <div v-for="t in autoTiles" :key="t.label" class="tile">
+          <q-icon :name="t.icon" class="tile__icon" />
+          <div class="tile__n num">{{ t.n.toLocaleString() }}</div>
+          <div class="tile__label">{{ t.label }}</div>
         </div>
-        <div v-if="autoLines.length" class="q-mt-sm text-body2 text-grey-8">
-          Resolved automatically: {{ autoLines.join(' · ') }}.
-        </div>
-      </q-card-section>
+      </div>
+    </section>
 
-      <q-separator v-if="analysis.warnings.length" />
-      <q-expansion-item v-if="analysis.warnings.length" icon="warning" :label="plural(analysis.warnings.length, 'warning')" header-class="text-orange-9" dense>
-        <q-card-section class="q-pt-none">
-          <ul class="q-my-none q-pl-md">
-            <li v-for="(w, i) in analysis.warnings.slice(0, 50)" :key="i" class="text-body2">{{ w }}</li>
-            <li v-if="analysis.warnings.length > 50" class="text-caption">… and {{ analysis.warnings.length - 50 }} more</li>
-          </ul>
-        </q-card-section>
-      </q-expansion-item>
-    </q-card>
+    <div v-if="compatibility?.warnings.length && !analysisError" class="callout callout--violet">
+      <div class="callout__icon"><q-icon :name="I.info" /></div>
+      <div>
+        <div class="callout__title">Good to know</div>
+        <div v-for="(w, i) in compatibility.warnings" :key="i" class="callout__body">{{ w }}</div>
+      </div>
+    </div>
 
-    <q-banner v-if="compatibility?.warnings.length && !analysisError" rounded dense class="bg-orange-1 text-orange-10">
-      <template #avatar><q-icon name="info" color="orange-8" /></template>
-      <div v-for="(w, i) in compatibility.warnings" :key="i">{{ w }}</div>
-    </q-banner>
+    <q-expansion-item
+      v-if="analysis?.warnings.length"
+      dense
+      :icon="I.warning"
+      :label="plural(analysis.warnings.length, 'warning')"
+      caption="Rows that could not be carried over and why"
+      header-class="warnings__head"
+      class="warnings"
+    >
+      <ul class="warnings__list">
+        <li v-for="(w, i) in analysis.warnings.slice(0, 60)" :key="i">{{ w }}</li>
+        <li v-if="analysis.warnings.length > 60" class="text-3">… and {{ analysis.warnings.length - 60 }} more (see the browser console)</li>
+      </ul>
+    </q-expansion-item>
 
-    <div class="row justify-between">
-      <q-btn flat no-caps icon="arrow_back" label="Back" @click="goTo('upload')" />
-      <q-btn unelevated color="primary" icon-right="arrow_forward" :label="conflicts.length ? 'Review conflicts' : 'Continue'" :disable="analyzing || !analysis" :loading="analyzing" @click="continueFromAnalyze()" />
+    <div class="actions">
+      <q-btn flat no-caps class="btn-link" :icon="I.arrowBack" label="Back" @click="goTo('upload')" />
+      <q-btn
+        class="btn-primary"
+        no-caps
+        :icon-right="I.arrowForward"
+        :label="hasConflicts ? `Review ${plural(conflicts.length, 'decision')}` : 'Continue to download'"
+        :disable="analyzing || !analysis"
+        @click="continueFromAnalyze()"
+      />
     </div>
   </div>
 </template>
+
+<style scoped>
+.progress {
+  padding: 22px 22px 20px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.progress__row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.progress__title {
+  font-weight: 700;
+  font-size: 16px;
+}
+.progress__sub {
+  font-size: 13px;
+}
+.progress__bar {
+  color: var(--primary);
+}
+.devices__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+.device {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+.device--error {
+  border-color: rgba(251, 113, 133, 0.4);
+  background: rgba(251, 113, 133, 0.05);
+}
+.device__head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+.device__icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  background: var(--surface-strong);
+  color: #c4b5fd;
+  flex: none;
+}
+.device--error .device__icon {
+  color: #fda4af;
+}
+.device__title {
+  min-width: 0;
+}
+.device__name {
+  font-weight: 700;
+  font-size: 16px;
+}
+.device__meta {
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.device__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.device__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.device__error {
+  font-size: 13px;
+  color: #fda4af;
+}
+.stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.stat .q-icon {
+  font-size: 17px;
+  color: var(--text-3);
+}
+.auto__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
+}
+.tile {
+  padding: 14px 14px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tile__icon {
+  font-size: 20px;
+  color: #67e8f9;
+  margin-bottom: 6px;
+}
+.tile__n {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+}
+.tile__label {
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.3;
+}
+.warnings {
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  background: rgba(251, 191, 36, 0.06);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.warnings :deep(.warnings__head) {
+  color: #fcd34d;
+}
+.warnings__list {
+  margin: 0;
+  padding: 0 18px 14px 40px;
+  font-size: 13.5px;
+  color: var(--text-2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.self-start {
+  align-self: flex-start;
+}
+</style>

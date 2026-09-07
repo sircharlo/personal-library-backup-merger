@@ -37,8 +37,25 @@ export type NoteConflict = Conflict<NoteRow>;
 export type InputFieldConflict = Conflict<InputFieldRow>;
 export type UserMarkConflict = Conflict<UserMarkRow>;
 
-/** conflictId → winning sourceIndex. Absent entries default to `suggestedWinnerIndex`. */
+/**
+ * conflictId → winning sourceIndex, or `KEEP_BOTH`. Absent entries default to `suggestedWinnerIndex`.
+ */
 export type ConflictResolutions = Map<string, number>;
+
+/**
+ * Resolution value meaning "keep every version": the suggested copy keeps its identity and each
+ * other copy is written as a separate row with a fresh GUID, so no content is ever discarded.
+ * Not possible for input fields (their identity *is* the field; two values cannot coexist).
+ */
+export const KEEP_BOTH = -1;
+
+export function supportsKeepBoth(kind: ConflictKind): boolean {
+  return kind === 'note' || kind === 'userMark';
+}
+
+export function isKeepBoth(conflict: Conflict, resolutions: ConflictResolutions): boolean {
+  return resolutions.get(conflict.id) === KEEP_BOTH && supportsKeepBoth(conflict.kind);
+}
 
 export function conflictIdFor(kind: ConflictKind, identityKey: string): string {
   return `${kind}:${identityKey}`;

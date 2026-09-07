@@ -1,17 +1,22 @@
 import { Notify, type QuasarPluginOptions } from 'quasar';
+import iconSet from 'quasar/icon-set/svg-material-symbols-rounded';
 
 export const quasarOptions: Partial<QuasarPluginOptions> = {
   plugins: { Notify },
+  iconSet,
   config: {
-    notify: { position: 'top', timeout: 5000 },
+    dark: true,
+    notify: { position: 'top', timeout: 4500, progress: true, classes: 'notify' },
     brand: {
-      primary: '#4a6da7',
-      secondary: '#5e8c61',
-      accent: '#9c6b98',
-      positive: '#3f8f5f',
-      negative: '#b23b3b',
-      warning: '#d9a441',
-      info: '#4a6da7',
+      primary: '#8b7cff',
+      secondary: '#22d3ee',
+      accent: '#d946ef',
+      dark: '#111a33',
+      'dark-page': '#0a0f1e',
+      positive: '#34d399',
+      negative: '#fb7185',
+      info: '#60a5fa',
+      warning: '#fbbf24',
     },
   },
 };

@@ -16,6 +16,30 @@ import { mergePlaylistItemAccuracy } from './tables/mergePlaylistItemAccuracy';
 import { mergeTag } from './tables/mergeTag';
 import { mergeTagMap } from './tables/mergeTagMap';
 import { mergeUserMark } from './tables/mergeUserMark';
+import { createLogger, fmtCount } from '../util/log';
+import type { MergeContext } from './context';
+
+const log = createLogger('analyze');
+
+/** Merge stages in FK-safe order; the table name is what each stage fills in `ctx.merged`. */
+const STAGES: { table: keyof AllTables; run: (ctx: MergeContext) => void }[] = [
+  { table: 'Location', run: mergeLocation },
+  { table: 'UserMark', run: mergeUserMark },
+  { table: 'IndependentMedia', run: mergeIndependentMedia },
+  { table: 'BlockRange', run: mergeBlockRange },
+  { table: 'Note', run: mergeNote },
+  { table: 'Bookmark', run: mergeBookmark },
+  { table: 'InputField', run: mergeInputField },
+  { table: 'Tag', run: mergeTag },
+  { table: 'PlaylistItemAccuracy', run: mergePlaylistItemAccuracy },
+  { table: 'PlaylistItem', run: mergePlaylistItem },
+  { table: 'TagMap', run: mergeTagMap },
+];
+
+export interface AnalyzeOptions {
+  /** Called before each merge stage (e.g. to drive a progress bar). */
+  onStage?: (stage: string, index: number, total: number) => void;
+}
 
 export interface SourceSummary {
   sourceIndex: number;
@@ -120,26 +144,38 @@ export function validateCompatibility(sources: ParsedBackup[]): CompatibilityRep
  * Pure, deterministic two-phase step 1: produces every non-conflicting merged row plus the
  * unfinalized conflict list. Sources are processed in upload order.
  */
-export function analyze(input: ParsedBackup[]): MergeAnalysis {
+export function analyze(input: ParsedBackup[], opts: AnalyzeOptions = {}): MergeAnalysis {
   const sources = input.map((s, i) => (s.sourceIndex === i ? s : { ...s, sourceIndex: i }));
+  const total = log.time(`analyzed ${sources.length} backup(s)`);
+  log.info(`analyzing ${sources.length} backup(s): ${sources.map((s) => `${s.deviceName} [${s.fileName}]`).join(', ')}`);
+
   const compatibility = validateCompatibility(sources);
-  if (!compatibility.ok) throw new IncompatibleBackupsError(compatibility);
+  log.debug('compatibility', compatibility);
+  if (!compatibility.ok) {
+    log.error('backups are incompatible', compatibility.errors);
+    throw new IncompatibleBackupsError(compatibility);
+  }
   if (compatibility.schemaVersion === null) throw new MergeError('Could not determine a common schema version.');
+  for (const w of compatibility.warnings) log.warn(w);
 
   const labels = makeSourceLabels(sources);
   const ctx = createMergeContext(sources, labels);
 
-  mergeLocation(ctx);
-  mergeUserMark(ctx);
-  mergeIndependentMedia(ctx);
-  mergeBlockRange(ctx);
-  mergeNote(ctx);
-  mergeBookmark(ctx);
-  mergeInputField(ctx);
-  mergeTag(ctx);
-  mergePlaylistItemAccuracy(ctx);
-  mergePlaylistItem(ctx);
-  mergeTagMap(ctx);
+  STAGES.forEach(({ table, run }, i) => {
+    opts.onStage?.(table, i, STAGES.length);
+    const t = log.time(`stage ${i + 1}/${STAGES.length} ${table}`);
+    const conflictsBefore = ctx.conflicts.length;
+    run(ctx);
+    const added = ctx.conflicts.length - conflictsBefore;
+    t(`${fmtCount(ctx.merged[table].length)} merged rows${added ? `, ${added} conflict(s)` : ''}`);
+  });
+
+  const byKind: Record<string, number> = {};
+  for (const c of ctx.conflicts) byKind[c.kind] = (byKind[c.kind] ?? 0) + 1;
+  log.info(`conflicts needing a decision: ${ctx.conflicts.length}`, byKind);
+  log.debug('auto-resolved', ctx.auto);
+  if (ctx.warnings.length) log.warn(`${ctx.warnings.length} warning(s)`, ctx.warnings);
+  total();
 
   const template = sources[compatibility.templateSourceIndex];
   const defaultThumbnail = sources.find((s) => s.defaultThumbnail)?.defaultThumbnail;
