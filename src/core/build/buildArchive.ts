@@ -1,4 +1,4 @@
-import type { JwManifest } from '../jwlibrary/types';
+import type { JwManifest, TableCounts } from '../jwlibrary/types';
 import { writeJwlibraryZip } from '../jwlibrary/zip';
 import type { MergeAnalysis } from '../merge/analyze';
 import type { MergeResult } from '../merge/finalize';
@@ -21,6 +21,10 @@ export interface BuildArchiveInput {
   now?: Date;
   /** Override the `LastModified` written to the db (defaults to `now` in SQLite's UTC format). */
   lastModified?: string;
+  /** Media to embed (defaults to everything the analysis collected; clean-ups may pass fewer). */
+  mediaFiles?: Map<string, Uint8Array>;
+  /** Rows intentionally removed by clean-ups, so validation can lower its bound accordingly. */
+  removed?: Partial<TableCounts>;
   onPhase?: (phase: BuildPhase) => void;
 }
 
@@ -40,6 +44,7 @@ const log = createLogger('build');
 /** Build db → validate → manifest (self-computed hash) → zip. */
 export async function buildArchive(input: BuildArchiveInput): Promise<BuildArchiveOutput> {
   const { analysis, result } = input;
+  const mediaFiles = input.mediaFiles ?? analysis.mediaFiles;
   const phase = (p: BuildPhase) => input.onPhase?.(p);
   const now = input.now ?? new Date();
   const lastModified = input.lastModified ?? formatSqliteUtc(now);
@@ -66,7 +71,7 @@ export async function buildArchive(input: BuildArchiveInput): Promise<BuildArchi
 
   phase('validate');
   const tValidate = log.time('validate');
-  const validation = await validateDatabaseBytes(dbBytes, analysis.sourceCounts, result.counts);
+  const validation = await validateDatabaseBytes(dbBytes, analysis.sourceCounts, result.counts, input.removed);
   tValidate(
     `fk violations ${validation.foreignKeyViolations}, integrity ${validation.integrityCheck}, re-open ${validation.reopen.ok ? 'ok' : 'FAILED'}, ${validation.errors.length} error(s), ${validation.warnings.length} warning(s)`,
   );
@@ -90,14 +95,14 @@ export async function buildArchive(input: BuildArchiveInput): Promise<BuildArchi
   const bytes = await writeJwlibraryZip({
     manifest,
     dbBytes,
-    mediaFiles: analysis.mediaFiles,
+    mediaFiles,
     defaultThumbnail: analysis.defaultThumbnail,
   });
-  tZip(`${fmtBytes(bytes.byteLength)} · ${analysis.mediaFiles.size} media files`);
+  tZip(`${fmtBytes(bytes.byteLength)} · ${mediaFiles.size} media files`);
   phase('done');
   total();
 
-  return { bytes, fileName, manifest, dbBytes, dbHash, lastModified, validation, mediaFileCount: analysis.mediaFiles.size };
+  return { bytes, fileName, manifest, dbBytes, dbHash, lastModified, validation, mediaFileCount: mediaFiles.size };
 }
 
 export function defaultDeviceName(sourceCount: number): string {

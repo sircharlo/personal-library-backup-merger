@@ -3,10 +3,51 @@ import { I } from '@/icons';
 import { computed } from 'vue';
 import { useMergeWizard } from '@/composables/useMergeWizard';
 import { defaultDeviceName } from '@/core/build/buildArchive';
+import { findingByCleanup, type CleanupKey } from '@/core/health/healthCheck';
 import { formatBytes, formatTimestamp, plural } from '@/utils/format';
+import HealthPanel from '@/components/HealthPanel.vue';
 
-const { analysis, conflicts, overriddenCount, keptBothCount, displayCounts, hasConflicts, deviceName, building, buildPhase, archive, buildError, downloadUrl, build, goTo } =
-  useMergeWizard();
+const {
+  analysis,
+  conflicts,
+  overriddenCount,
+  keptBothCount,
+  displayCounts,
+  displayMediaCount,
+  mergedHealth,
+  cleanups,
+  hasConflicts,
+  deviceName,
+  building,
+  buildPhase,
+  archive,
+  buildError,
+  downloadUrl,
+  setCleanup,
+  build,
+  goTo,
+} = useMergeWizard();
+
+const CLEANUPS: { key: CleanupKey; label: string; desc: string }[] = [
+  { key: 'unreferencedLocations', label: 'Remove locations nothing refers to', desc: 'Publication and chapter references left behind by deleted notes and highlights.' },
+  { key: 'duplicateHighlights', label: 'Merge exact duplicate highlights', desc: 'Same passage, same ranges, same colour — the copy that carries notes is kept.' },
+  { key: 'unusedMedia', label: 'Drop media used by no playlist item', desc: 'Shrinks the backup; nothing in the app refers to these files.' },
+  { key: 'rangelessHighlights', label: 'Remove invisible highlights', desc: 'Highlights without a highlighted range; their notes stay on the location.' },
+  { key: 'emptyNotes', label: 'Remove empty notes', desc: 'No title and no content. Off by default in case they are placeholders.' },
+];
+const cleanupRows = computed(() => CLEANUPS.map((c) => ({ ...c, count: findingByCleanup(mergedHealth.value, c.key)?.count ?? 0 })));
+
+const cleanupLine = computed(() => {
+  const c = archive.value?.cleanup;
+  if (!c) return '';
+  const parts: string[] = [];
+  if (c.unreferencedLocations) parts.push(plural(c.unreferencedLocations, 'unreferenced location'));
+  if (c.duplicateHighlights) parts.push(`${plural(c.duplicateHighlights, 'duplicate highlight')}${c.notesReattached ? ` (${plural(c.notesReattached, 'note')} re-attached)` : ''}`);
+  if (c.unusedMedia) parts.push(plural(c.unusedMedia, 'unused media file'));
+  if (c.rangelessHighlights) parts.push(`${plural(c.rangelessHighlights, 'invisible highlight')}${c.notesDetached ? ` (${plural(c.notesDetached, 'note')} kept on the location)` : ''}`);
+  if (c.emptyNotes) parts.push(plural(c.emptyNotes, 'empty note'));
+  return parts.join(' · ');
+});
 
 const placeholder = computed(() => defaultDeviceName(analysis.value?.sources.length ?? 0));
 
@@ -20,7 +61,7 @@ const phaseIndex = computed(() => Math.max(0, PHASES.findIndex((p) => p.key === 
 
 const tiles = computed(() => {
   const a = analysis.value;
-  const c = displayCounts.value;
+  const c = archive.value?.counts ?? displayCounts.value;
   if (!a || !c) return [];
   return [
     { icon: I.stickyNote2, label: 'Notes', n: c.Note },
@@ -29,7 +70,7 @@ const tiles = computed(() => {
     { icon: I.label, label: 'Tags', n: Math.max(0, c.Tag - a.playlistCount) },
     { icon: I.playlistPlay, label: 'Playlists', n: a.playlistCount },
     { icon: I.queueMusic, label: 'Playlist items', n: c.PlaylistItem },
-    { icon: I.permMedia, label: 'Media files', n: a.mediaFileCount },
+    { icon: I.permMedia, label: 'Media files', n: archive.value?.mediaFileCount ?? displayMediaCount.value },
     { icon: I.editNote, label: 'Input fields', n: c.InputField },
   ];
 });
@@ -82,6 +123,26 @@ const checks = computed(() => {
       <q-btn v-if="hasConflicts" flat dense no-caps class="btn-link" label="Change" :icon="I.edit" @click="goTo('resolve')" />
     </div>
 
+    <section v-if="mergedHealth" class="cleanbox">
+      <div>
+        <h3 class="h-section">Clean-up</h3>
+        <p class="text-3 cleanbox__intro">Optional. Removes leftovers the health check found in the merged result. Every removal is counted and verified against the sources.</p>
+      </div>
+      <ul class="cleanups">
+        <li v-for="c in cleanupRows" :key="c.key" class="cleanup" :class="{ 'is-empty': c.count === 0 }">
+          <q-toggle :model-value="cleanups[c.key]" color="positive" dense :disable="building" :aria-label="c.label" @update:model-value="(v: boolean) => setCleanup(c.key, v)" />
+          <div class="cleanup__text">
+            <div class="cleanup__label">{{ c.label }}</div>
+            <div class="cleanup__desc text-3">{{ c.desc }}</div>
+          </div>
+          <span class="pill cleanup__count" :class="c.count ? (cleanups[c.key] ? 'pill--mint' : 'pill--amber') : ''">
+            {{ c.count === 0 ? 'none found' : cleanups[c.key] ? `−${c.count.toLocaleString()}` : `${c.count.toLocaleString()} found` }}
+          </span>
+        </li>
+      </ul>
+      <HealthPanel title="Merged result, before clean-up" :report="mergedHealth" class="cleanbox__health" />
+    </section>
+
     <section class="buildbox">
       <div class="buildbox__form">
         <q-input v-model="deviceName" outlined dense dark label="Device name written into the backup" :placeholder="placeholder" :disable="building" class="buildbox__input">
@@ -116,6 +177,7 @@ const checks = computed(() => {
               <span class="check__detail text-3">{{ c.detail }}</span>
             </li>
           </ul>
+          <div v-if="cleanupLine" class="notes text-2"><q-icon :name="I.taskAlt" class="q-mr-xs" />Clean-up removed {{ cleanupLine }}.</div>
           <div v-if="archive.validation.warnings.length" class="notes text-3">
             <div v-for="(w, i) in archive.validation.warnings" :key="i">{{ w }}</div>
           </div>
@@ -195,6 +257,7 @@ const checks = computed(() => {
   flex: 1;
   min-width: 0;
 }
+.cleanbox,
 .buildbox {
   display: flex;
   flex-direction: column;
@@ -203,6 +266,49 @@ const checks = computed(() => {
   border-radius: var(--radius);
   background: var(--surface);
   border: 1px solid var(--border);
+}
+.cleanbox__intro {
+  font-size: 13px;
+  margin-top: -6px;
+  max-width: 80ch;
+}
+.cleanups {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cleanup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px 8px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+.cleanup.is-empty {
+  opacity: 0.6;
+}
+.cleanup__text {
+  flex: 1;
+  min-width: 0;
+}
+.cleanup__label {
+  font-weight: 600;
+  font-size: 14px;
+}
+.cleanup__desc {
+  font-size: 12.5px;
+}
+.cleanup__count {
+  flex: none;
+}
+.cleanbox__health {
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
 }
 .buildbox__form {
   display: flex;

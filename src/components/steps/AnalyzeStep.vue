@@ -4,6 +4,7 @@ import { computed } from 'vue';
 import { useMergeWizard } from '@/composables/useMergeWizard';
 import { formatBytes, formatTimestamp, plural } from '@/utils/format';
 import { deviceIcon, deviceKind, statChips } from '@/utils/display';
+import HealthPanel from '@/components/HealthPanel.vue';
 
 const { files, analyzing, analysisProgress, analysis, analysisError, compatibility, conflictCounts, conflicts, hasConflicts, removeFileAndReanalyze, goTo, continueFromAnalyze } =
   useMergeWizard();
@@ -142,6 +143,19 @@ const autoTiles = computed(() => {
           <div class="device__error">{{ f.error }}</div>
           <q-btn flat no-caps dense class="btn-link self-start" :icon="I.delete" label="Leave this file out" @click="removeFileAndReanalyze(f.id)" />
         </article>
+      </div>
+    </section>
+
+    <section v-if="okFiles.length && analysis" class="healthsec">
+      <h3 class="h-section">Health check</h3>
+      <p class="text-3 healthsec__intro">
+        JW Library keeps its database without referential checks, so leftovers accumulate — especially on Windows. Problems with a clean-up are offered as
+        toggles on the download step; the rest is informational.
+      </p>
+      <div class="healthsec__grid">
+        <template v-for="f in okFiles" :key="f.id">
+          <HealthPanel v-if="f.summary" :title="f.summary.deviceName" :report="f.summary.health" class="healthsec__card" />
+        </template>
       </div>
     </section>
 
@@ -342,5 +356,21 @@ const autoTiles = computed(() => {
 }
 .self-start {
   align-self: flex-start;
+}
+.healthsec__intro {
+  font-size: 13px;
+  margin: -4px 0 12px;
+  max-width: 80ch;
+}
+.healthsec__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr));
+  gap: 12px;
+}
+.healthsec__card {
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
 }
 </style>

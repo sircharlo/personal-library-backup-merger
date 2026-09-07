@@ -8,8 +8,9 @@ import { buildArchive, type BuildArchiveOutput } from '../../src/core/build/buil
 import { sha256hex } from '../../src/core/hash';
 import { parseBackup } from '../../src/core/jwlibrary/parseBackup';
 import { openDatabase, queryRows, queryScalar } from '../../src/core/jwlibrary/sqlite';
-import { DATA_TABLE_NAMES, type DataTableName, type ParsedBackup, type TableCounts } from '../../src/core/jwlibrary/types';
+import { DATA_TABLE_NAMES, countTables, type DataTableName, type ParsedBackup, type TableCounts } from '../../src/core/jwlibrary/types';
 import { analyze, type MergeAnalysis } from '../../src/core/merge/analyze';
+import { applyCleanups, type CleanupOptions, type CleanupSummary } from '../../src/core/merge/cleanup';
 import type { ConflictResolutions } from '../../src/core/merge/conflicts';
 import { finalize, type MergeResult } from '../../src/core/merge/finalize';
 import { localRowKey } from '../../src/core/merge/identity';
@@ -26,6 +27,8 @@ export interface MergeRun {
   archive: BuildArchiveOutput;
   /** Zip member names of the produced archive. */
   zipEntries: string[];
+  /** Present when clean-ups were applied. */
+  cleanup?: CleanupSummary;
 }
 
 export async function parseSpecs(specs: FixtureSpec[]): Promise<ParsedBackup[]> {
@@ -37,14 +40,27 @@ export async function parseSpecs(specs: FixtureSpec[]): Promise<ParsedBackup[]> 
   return out;
 }
 
-export async function runMerge(specs: FixtureSpec[], resolutions: ConflictResolutions = new Map(), deviceName?: string): Promise<MergeRun> {
+export async function runMerge(
+  specs: FixtureSpec[],
+  resolutions: ConflictResolutions = new Map(),
+  deviceName?: string,
+  cleanups?: CleanupOptions,
+): Promise<MergeRun> {
   const sources = await parseSpecs(specs);
   const analysis = analyze(sources);
-  const result = finalize(analysis, resolutions);
-  const archive = await buildArchive({ analysis, result, now: FIXED_NOW, deviceName });
+  let result = finalize(analysis, resolutions);
+  let mediaFiles = analysis.mediaFiles;
+  let cleanup: CleanupSummary | undefined;
+  if (cleanups) {
+    const cleaned = applyCleanups(result.tables, analysis.mediaFiles, cleanups);
+    result = { ...result, tables: cleaned.tables, counts: countTables(cleaned.tables) };
+    mediaFiles = cleaned.mediaFiles;
+    cleanup = cleaned.summary;
+  }
+  const archive = await buildArchive({ analysis, result, now: FIXED_NOW, deviceName, mediaFiles, removed: cleanup?.removed });
   const zip = await JSZip.loadAsync(archive.bytes);
   const zipEntries = Object.keys(zip.files).sort();
-  return { specs, sources, analysis, result, archive, zipEntries };
+  return { specs, sources, analysis, result, archive, zipEntries, cleanup };
 }
 
 /** Open the produced database for direct SQL assertions (caller closes). */
@@ -134,7 +150,7 @@ export async function assertReopenSanity(run: MergeRun): Promise<ParsedBackup> {
   expect(reparsed.lastModified).toBe(run.archive.lastModified);
   expect(reparsed.manifest.userDataBackup.hash).toBe(await sha256hex(run.archive.dbBytes));
   expect(reparsed.manifest.userDataBackup.hash).toBe(run.archive.dbHash);
-  expect(reparsed.mediaFiles.size).toBe(run.analysis.mediaFiles.size);
+  expect(reparsed.mediaFiles.size).toBe(run.archive.mediaFileCount);
   expect(run.zipEntries).toContain('manifest.json');
   expect(run.zipEntries).toContain('userData.db');
   return reparsed;

@@ -7,7 +7,9 @@ export interface RowCountCheck {
   final: number;
   maxSource: number;
   sumSource: number;
-  /** `max(sourceCounts) <= final <= sum(sourceCounts)` */
+  /** Rows intentionally removed by clean-ups (lowers the bound below). */
+  removed: number;
+  /** `max(sourceCounts) - removed <= final <= sum(sourceCounts)` */
   ok: boolean;
 }
 
@@ -55,6 +57,7 @@ export async function validateDatabaseBytes(
   dbBytes: Uint8Array,
   sourceCounts: TableCounts[],
   expectedCounts?: TableCounts,
+  removed: Partial<TableCounts> = {},
 ): Promise<ValidationReport> {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -79,16 +82,17 @@ export async function validateDatabaseBytes(
     const maxSource = counts.length ? Math.max(...counts) : 0;
     const sumSource = counts.reduce((a, b) => a + b, 0);
     const final = finalCounts[table];
+    const removedHere = removed[table] ?? 0;
     const upperOk = final <= sumSource;
-    const lowerOk = final >= maxSource;
+    const lowerOk = final >= maxSource - removedHere;
     if (!upperOk) errors.push(`${table}: merged count ${final} exceeds the sum of the sources (${sumSource}).`);
     if (!lowerOk) {
-      const msg = `${table}: merged count ${final} is below the largest source (${maxSource}).`;
+      const msg = `${table}: merged count ${final} is below the largest source (${maxSource})${removedHere ? ` minus the ${removedHere} row(s) removed by clean-up` : ''}.`;
       if (LOWER_BOUND_SOFT_TABLES.has(table)) warnings.push(msg + ' (expected when a highlight conflict winner has fewer ranges)');
       else errors.push(msg);
     }
     if (expectedCounts && expectedCounts[table] !== final) errors.push(`${table}: database holds ${final} rows but the merge produced ${expectedCounts[table]}.`);
-    return { table, final, maxSource, sumSource, ok: upperOk && (lowerOk || LOWER_BOUND_SOFT_TABLES.has(table)) };
+    return { table, final, maxSource, sumSource, removed: removedHere, ok: upperOk && (lowerOk || LOWER_BOUND_SOFT_TABLES.has(table)) };
   });
 
   const reopened = await openDatabase(reexported);

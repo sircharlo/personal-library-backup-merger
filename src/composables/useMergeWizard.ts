@@ -7,7 +7,9 @@ import { computed, ref, shallowRef } from 'vue';
 import type { BuildPhase } from '@/core/build/buildArchive';
 import type { ParsePhase } from '@/core/jwlibrary/parseBackup';
 import { KEEP_BOTH, supportsKeepBoth, type Conflict, type ConflictKind } from '@/core/merge/conflicts';
-import type { TableCounts } from '@/core/jwlibrary/types';
+import { DEFAULT_CLEANUPS, type CleanupOptions } from '@/core/merge/cleanup';
+import { findingByCleanup, type CleanupKey } from '@/core/health/healthCheck';
+import type { DataTableName, TableCounts } from '@/core/jwlibrary/types';
 import type { CompatibilityReport } from '@/core/merge/errors';
 import { createLogger, errorMessage, fmtBytes, fmtCount, fmtMs, getLogLevel, setLogLevel } from '@/core/util/log';
 import { MergeWorkerClient, WorkerRequestError } from '@/worker/client';
@@ -57,6 +59,7 @@ const analysisError = ref<string | null>(null);
 const compatibility = shallowRef<CompatibilityReport | null>(null);
 const resolutions = shallowRef<Map<string, number>>(new Map());
 const deviceName = ref('');
+const cleanups = ref<CleanupOptions>({ ...DEFAULT_CLEANUPS });
 const building = ref(false);
 const buildPhase = ref<BuildPhase | null>(null);
 const archive = shallowRef<BuildView | null>(null);
@@ -82,7 +85,15 @@ const overriddenCount = computed(() => {
   return n;
 });
 const keptBothCount = computed(() => conflicts.value.filter((c) => resolutions.value.get(c.id) === KEEP_BOTH && supportsKeepBoth(c.kind)).length);
-/** Merged row counts reflecting the current decisions (keeping both versions adds rows). */
+const mergedHealth = computed(() => analysis.value?.mergedHealth ?? null);
+const CLEANUP_TABLE: Record<CleanupKey, DataTableName> = {
+  emptyNotes: 'Note',
+  rangelessHighlights: 'UserMark',
+  duplicateHighlights: 'UserMark',
+  unusedMedia: 'IndependentMedia',
+  unreferencedLocations: 'Location',
+};
+/** Merged row counts reflecting the current decisions (keeping both adds rows, clean-ups remove some). */
 const displayCounts = computed<TableCounts | null>(() => {
   const base = analysis.value?.counts;
   if (!base) return null;
@@ -93,7 +104,16 @@ const displayCounts = computed<TableCounts | null>(() => {
     if (c.kind === 'note') out.Note += extra;
     if (c.kind === 'userMark') out.UserMark += extra;
   }
+  for (const key of Object.keys(CLEANUP_TABLE) as CleanupKey[]) {
+    if (!cleanups.value[key]) continue;
+    const table = CLEANUP_TABLE[key];
+    out[table] = Math.max(0, out[table] - (findingByCleanup(mergedHealth.value, key)?.count ?? 0));
+  }
   return out;
+});
+const displayMediaCount = computed(() => {
+  const base = analysis.value?.mediaFileCount ?? 0;
+  return cleanups.value.unusedMedia ? Math.max(0, base - (findingByCleanup(mergedHealth.value, 'unusedMedia')?.count ?? 0)) : base;
 });
 const stepIndex = computed(() => STEP_ORDER.indexOf(step.value) + 1);
 const parsedFiles = computed(() => files.value.filter((f) => f.status === 'ok'));
@@ -318,16 +338,22 @@ function chosenFor(conflict: Conflict): number {
   return resolutions.value.get(conflict.id) ?? conflict.suggestedWinnerIndex;
 }
 
+function setCleanup(key: CleanupKey, on: boolean): void {
+  cleanups.value = { ...cleanups.value, [key]: on };
+  log.info(`clean-up ${key}: ${on ? 'on' : 'off'}`);
+  clearArchive();
+}
+
 async function build(): Promise<void> {
   if (!analysis.value) return;
   building.value = true;
   buildError.value = null;
   buildPhase.value = 'database';
   const t0 = performance.now();
-  log.info(`build: ${conflicts.value.length} conflict(s), ${overriddenCount.value} overridden, device "${deviceName.value || '(default)'}"`);
+  log.info(`build: ${conflicts.value.length} conflict(s), ${overriddenCount.value} overridden, device "${deviceName.value || '(default)'}"`, { cleanups: cleanups.value });
   try {
     const out = await worker().request<BuildView>(
-      { type: 'build', resolutions: [...resolutions.value.entries()], deviceName: deviceName.value },
+      { type: 'build', resolutions: [...resolutions.value.entries()], deviceName: deviceName.value, cleanups: { ...cleanups.value } },
       {
         label: 'build archive',
         onProgress: (p) => {
@@ -340,7 +366,7 @@ async function build(): Promise<void> {
     downloadUrl.value = URL.createObjectURL(new Blob([out.bytes.slice()], { type: 'application/zip' }));
     log.info(
       `build done in ${fmtMs(performance.now() - t0)}: ${out.fileName} · ${fmtBytes(out.bytes.byteLength)} · db ${fmtBytes(out.dbSize)} · ${out.mediaFileCount} media files · sha256 ${out.dbHash.slice(0, 12)}… · validation ${out.validation.ok ? 'OK' : 'FAILED'}`,
-      out.validation,
+      { validation: out.validation, cleanup: out.cleanup },
     );
     if (!out.validation.ok) log.error('validation errors', out.validation.errors);
   } catch (e) {
@@ -358,6 +384,7 @@ function reset(): void {
   files.value = [];
   rawFiles.clear();
   deviceName.value = '';
+  cleanups.value = { ...DEFAULT_CLEANUPS };
   step.value = 'upload';
   void worker().request({ type: 'reset' }, { label: 'reset' }).catch(() => {});
 }
@@ -372,6 +399,7 @@ export function installDebugConsole(): void {
         analysis: analysis.value,
         analysisError: analysisError.value,
         resolutions: Object.fromEntries(resolutions.value),
+        cleanups: { ...cleanups.value },
         archive: archive.value ? { ...archive.value, bytes: `<${archive.value.bytes.byteLength} bytes>` } : null,
         buildError: buildError.value,
       };
@@ -402,6 +430,9 @@ export function useMergeWizard() {
     overriddenCount,
     keptBothCount,
     displayCounts,
+    displayMediaCount,
+    mergedHealth,
+    cleanups,
     parsedFiles,
     busyCount,
     canMerge,
@@ -424,6 +455,7 @@ export function useMergeWizard() {
     setResolution,
     acceptAllSuggestions,
     chosenFor,
+    setCleanup,
     build,
     reset,
   };

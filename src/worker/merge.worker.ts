@@ -5,10 +5,12 @@
  */
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { buildArchive } from '@/core/build/buildArchive';
+import { checkHealth } from '@/core/health/healthCheck';
 import { parseBackup } from '@/core/jwlibrary/parseBackup';
 import { configureSqlJs, initSqlJsOnce } from '@/core/jwlibrary/sqlite';
-import type { ParsedBackup } from '@/core/jwlibrary/types';
+import { countTables, type ParsedBackup } from '@/core/jwlibrary/types';
 import { analyze, type MergeAnalysis } from '@/core/merge/analyze';
+import { applyCleanups } from '@/core/merge/cleanup';
 import { IncompatibleBackupsError } from '@/core/merge/errors';
 import { finalize } from '@/core/merge/finalize';
 import { TAG_TYPE_PLAYLIST } from '@/core/merge/tables/mergeTag';
@@ -67,9 +69,18 @@ async function handle(req: WorkerRequest): Promise<void> {
       case 'build': {
         if (!analysis) throw new Error('Nothing to build — run the analysis first.');
         const resolutions = new Map(req.resolutions);
-        const result = finalize(analysis, resolutions);
-        log.debug(`finalize: ${result.resolvedConflicts.length} conflict(s) applied, ${result.resolvedConflicts.filter((r) => !r.wasSuggested).length} overridden`);
-        const out = await buildArchive({ analysis, result, deviceName: req.deviceName, onPhase: (phase) => progress({ kind: 'build', phase }) });
+        const resolved = finalize(analysis, resolutions);
+        log.debug(`finalize: ${resolved.resolvedConflicts.length} conflict(s) applied, ${resolved.resolvedConflicts.filter((r) => !r.wasSuggested).length} overridden`);
+        const cleaned = applyCleanups(resolved.tables, analysis.mediaFiles, req.cleanups);
+        const result = { ...resolved, tables: cleaned.tables, counts: countTables(cleaned.tables) };
+        const out = await buildArchive({
+          analysis,
+          result,
+          deviceName: req.deviceName,
+          mediaFiles: cleaned.mediaFiles,
+          removed: cleaned.summary.removed,
+          onPhase: (phase) => progress({ kind: 'build', phase }),
+        });
         const view: BuildView = {
           bytes: out.bytes,
           fileName: out.fileName,
@@ -78,6 +89,8 @@ async function handle(req: WorkerRequest): Promise<void> {
           dbSize: out.dbBytes.byteLength,
           lastModified: out.lastModified,
           validation: out.validation,
+          counts: result.counts,
+          cleanup: cleaned.summary,
           mediaFileCount: out.mediaFileCount,
           durationMs: performance.now() - t0,
         };
@@ -112,7 +125,10 @@ function describe(req: WorkerRequest): string {
     case 'analyze':
       return req.fileIds.join(', ');
     case 'build':
-      return `${req.resolutions.length} explicit resolution(s), device "${req.deviceName || '(default)'}"`;
+      return `${req.resolutions.length} explicit resolution(s), device "${req.deviceName || '(default)'}", clean-ups ${Object.entries(req.cleanups)
+        .filter(([, on]) => on)
+        .map(([k]) => k)
+        .join('+') || 'none'}`;
     case 'remove':
       return req.fileId;
     default:
@@ -132,6 +148,7 @@ function summarize(p: ParsedBackup, durationMs: number): FileSummary {
     mediaFileCount: p.mediaFiles.size,
     triggerCount: p.schemaObjects.triggers.length,
     schemaCheck: p.schemaCheck,
+    health: checkHealth(p.tables, p.mediaFiles.keys()),
     dbSize: 0,
     durationMs,
   };
@@ -147,6 +164,7 @@ function makeAnalysisView(a: MergeAnalysis, durationMs: number): AnalysisView {
     auto: a.auto,
     warnings: a.warnings,
     counts: defaults.counts,
+    mergedHealth: checkHealth(defaults.tables, a.mediaFiles.keys()),
     playlistCount: a.merged.Tag.filter((t) => t.Type === TAG_TYPE_PLAYLIST).length,
     mediaFileCount: a.mediaFiles.size,
     schemaVersion: a.schemaVersion,

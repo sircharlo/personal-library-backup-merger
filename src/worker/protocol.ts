@@ -1,4 +1,6 @@
 import type { BuildPhase } from '@/core/build/buildArchive';
+import type { HealthReport } from '@/core/health/healthCheck';
+import type { CleanupOptions, CleanupSummary } from '@/core/merge/cleanup';
 import type { ParsePhase } from '@/core/jwlibrary/parseBackup';
 import type { JwManifest, SchemaCheckResult, TableCounts } from '@/core/jwlibrary/types';
 import type { SourceSummary } from '@/core/merge/analyze';
@@ -19,6 +21,7 @@ export interface FileSummary {
   mediaFileCount: number;
   triggerCount: number;
   schemaCheck: SchemaCheckResult;
+  health: HealthReport;
   dbSize: number;
   durationMs: number;
 }
@@ -32,6 +35,8 @@ export interface AnalysisView {
   warnings: string[];
   /** Merged row counts with every conflict resolved to its suggestion. */
   counts: TableCounts;
+  /** Health of the merged result before any clean-up (drives the clean-up toggles). */
+  mergedHealth: HealthReport;
   playlistCount: number;
   mediaFileCount: number;
   schemaVersion: number;
@@ -49,6 +54,9 @@ export interface BuildView {
   dbSize: number;
   lastModified: string;
   validation: ValidationReport;
+  /** Row counts actually written. */
+  counts: TableCounts;
+  cleanup: CleanupSummary;
   mediaFileCount: number;
   durationMs: number;
 }
@@ -63,7 +71,7 @@ export type WorkerRequestBody =
   | { type: 'parse'; fileId: string; fileName: string; bytes: ArrayBuffer }
   | { type: 'remove'; fileId: string }
   | { type: 'analyze'; fileIds: string[] }
-  | { type: 'build'; resolutions: [string, number][]; deviceName: string }
+  | { type: 'build'; resolutions: [string, number][]; deviceName: string; cleanups: CleanupOptions }
   | { type: 'reset' };
 
 export type WorkerRequest = WorkerRequestBody & { requestId: number };
