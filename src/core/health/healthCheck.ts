@@ -7,12 +7,13 @@ import type { AllTables, LocationRow } from '../jwlibrary/types';
 import { describeLocation } from '../merge/describe';
 import { blockRangeSignature } from '../merge/identity';
 import { normalizeText } from '../merge/tables/mergeNote';
+import { TAG_TYPE_PLAYLIST } from '../merge/tables/mergeTag';
 import { createLogger, fmtMs } from '../util/log';
 
 export type HealthCategory = 'dangling' | 'unreferenced' | 'inconsistent' | 'archive';
 
 /** Clean-ups the merger can apply to the merged output (each maps to one finding). */
-export type CleanupKey = 'emptyNotes' | 'rangelessHighlights' | 'duplicateHighlights' | 'unusedMedia' | 'unreferencedLocations';
+export type CleanupKey = 'emptyNotes' | 'emptyPlaylists' | 'rangelessHighlights' | 'duplicateHighlights' | 'unusedMedia' | 'unreferencedLocations';
 
 export interface HealthFinding {
   code: string;
@@ -163,11 +164,20 @@ export function checkHealth(t: AllTables, mediaFileNames?: Iterable<string>): He
   check(
     'B3',
     'unreferenced',
-    'tags or playlists with no items',
+    'tags applied to nothing',
     (b) => {
-      for (const g of t.Tag) if (!assignedTags.has(g.TagId)) b.hit(() => `${g.Type === 2 ? 'playlist' : 'tag'} "${g.Name}"`);
+      for (const g of t.Tag) if (g.Type !== TAG_TYPE_PLAYLIST && !assignedTags.has(g.TagId)) b.hit(() => `tag "${g.Name}"`);
     },
     { info: true },
+  );
+  check(
+    'B9',
+    'unreferenced',
+    'playlists with no items',
+    (b) => {
+      for (const g of t.Tag) if (g.Type === TAG_TYPE_PLAYLIST && !assignedTags.has(g.TagId)) b.hit(() => `playlist "${g.Name}"`);
+    },
+    { info: true, cleanup: 'emptyPlaylists' },
   );
 
   const usedMediaIds = new Set(t.PlaylistItemIndependentMediaMap.map((x) => x.IndependentMediaId));

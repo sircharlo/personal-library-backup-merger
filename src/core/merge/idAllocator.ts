@@ -112,4 +112,11 @@ export class SourceIdMaps {
     const g = this.globalKey(name, localKey);
     return typeof g === 'number' ? g : undefined;
   }
+
+  /** Rows of `name` this source could not carry over (already broken in that backup; each one was warned about). */
+  droppedCount(name: DataTableName): number {
+    let n = 0;
+    for (const e of this.maps.get(name)?.values() ?? []) if (e.kind === 'dropped') n++;
+    return n;
+  }
 }

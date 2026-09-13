@@ -71,7 +71,7 @@ export async function buildArchive(input: BuildArchiveInput): Promise<BuildArchi
 
   phase('validate');
   const tValidate = log.time('validate');
-  const validation = await validateDatabaseBytes(dbBytes, analysis.sourceCounts, result.counts, input.removed);
+  const validation = await validateDatabaseBytes(dbBytes, analysis.sourceCounts, result.counts, input.removed, analysis.droppedCounts);
   tValidate(
     `fk violations ${validation.foreignKeyViolations}, integrity ${validation.integrityCheck}, re-open ${validation.reopen.ok ? 'ok' : 'FAILED'}, ${validation.errors.length} error(s), ${validation.warnings.length} warning(s)`,
   );

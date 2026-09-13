@@ -6,11 +6,13 @@ import { isEmptyNote, type CleanupKey } from '../health/healthCheck';
 import { DATA_TABLE_NAMES, type AllTables, type DataTableName, type TableCounts, type UserMarkRow } from '../jwlibrary/types';
 import { createLogger, fmtCount } from '../util/log';
 import { blockRangeSignature } from './identity';
+import { TAG_TYPE_PLAYLIST } from './tables/mergeTag';
 
 export type CleanupOptions = Record<CleanupKey, boolean>;
 
 export const DEFAULT_CLEANUPS: CleanupOptions = {
   emptyNotes: false,
+  emptyPlaylists: false,
   rangelessHighlights: true,
   duplicateHighlights: true,
   unusedMedia: true,
@@ -19,6 +21,8 @@ export const DEFAULT_CLEANUPS: CleanupOptions = {
 
 export interface CleanupSummary {
   emptyNotes: number;
+  /** Playlists (`Tag.Type = 2`) that contained no items. */
+  emptyPlaylists: number;
   rangelessHighlights: number;
   /** Notes that were attached to a removed range-less highlight and now hang off the location only. */
   notesDetached: number;
@@ -44,6 +48,7 @@ export function applyCleanups(input: AllTables, mediaFiles: Map<string, Uint8Arr
   for (const name of DATA_TABLE_NAMES) (t as Record<DataTableName, unknown[]>)[name] = [...input[name]];
   const summary: CleanupSummary = {
     emptyNotes: 0,
+    emptyPlaylists: 0,
     rangelessHighlights: 0,
     notesDetached: 0,
     duplicateHighlights: 0,
@@ -118,6 +123,14 @@ export function applyCleanups(input: AllTables, mediaFiles: Map<string, Uint8Arr
       for (const m of gone) files.delete(m.FilePath);
     }
     summary.unusedMedia = gone.length;
+  }
+
+  if (opts.emptyPlaylists) {
+    // A playlist is a Tag of type 2 and its items are TagMap rows. Regular tags are never touched here.
+    const used = new Set(t.TagMap.map((m) => m.TagId));
+    const gone = new Set(t.Tag.filter((g) => g.Type === TAG_TYPE_PLAYLIST && !used.has(g.TagId)).map((g) => g.TagId));
+    t.Tag = t.Tag.filter((g) => !gone.has(g.TagId));
+    summary.emptyPlaylists = gone.size;
   }
 
   if (opts.unreferencedLocations) {

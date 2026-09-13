@@ -1,5 +1,5 @@
 import { parseMigrationNumber } from '../jwlibrary/schema';
-import type { AllTables, ParsedBackup, SchemaCheckResult, SchemaObjects, TableCounts } from '../jwlibrary/types';
+import { DATA_TABLE_NAMES, type AllTables, type ParsedBackup, type SchemaCheckResult, type SchemaObjects, type TableCounts } from '../jwlibrary/types';
 import { maxTimestamp } from '../util/datetime';
 import type { Conflict } from './conflicts';
 import { createMergeContext, type AutoResolutionSummary } from './context';
@@ -77,6 +77,11 @@ export interface MergeAnalysis {
   /** Latest LastModified among the sources (informational). */
   latestSourceLastModified: string;
   sourceCounts: TableCounts[];
+  /**
+   * Per source: rows the merge deliberately left out because they were already broken in that backup
+   * (dangling references; every one is in `warnings`). Validation lowers its row-count bound by these.
+   */
+  droppedCounts: TableCounts[];
 }
 
 /** Human labels per source (device name, disambiguated), in upload order. */
@@ -175,6 +180,9 @@ export function analyze(input: ParsedBackup[], opts: AnalyzeOptions = {}): Merge
   log.info(`conflicts needing a decision: ${ctx.conflicts.length}`, byKind);
   log.debug('auto-resolved', ctx.auto);
   if (ctx.warnings.length) log.warn(`${ctx.warnings.length} warning(s)`, ctx.warnings);
+  const droppedCounts = ctx.idMaps.map(countDropped);
+  const droppedTotal = droppedCounts.reduce((n, c) => n + DATA_TABLE_NAMES.reduce((m, t) => m + c[t], 0), 0);
+  if (droppedTotal) log.info(`${fmtCount(droppedTotal)} source row(s) were already broken in their backup and left out`, droppedCounts);
   total();
 
   const template = sources[compatibility.templateSourceIndex];
@@ -211,5 +219,12 @@ export function analyze(input: ParsedBackup[], opts: AnalyzeOptions = {}): Merge
     defaultThumbnail,
     latestSourceLastModified: maxTimestamp(sources.map((s) => s.lastModified)),
     sourceCounts: sources.map((s) => s.counts),
+    droppedCounts,
   };
+}
+
+function countDropped(idMap: SourceIdMaps): TableCounts {
+  const out = {} as TableCounts;
+  for (const t of DATA_TABLE_NAMES) out[t] = idMap.droppedCount(t);
+  return out;
 }

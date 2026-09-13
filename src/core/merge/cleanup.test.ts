@@ -6,8 +6,8 @@ import { applyCleanups, DEFAULT_CLEANUPS, type CleanupOptions } from './cleanup'
 
 const USED = 'm-used.png';
 const UNUSED = 'm-unused.png';
-const ALL_ON: CleanupOptions = { emptyNotes: true, rangelessHighlights: true, duplicateHighlights: true, unusedMedia: true, unreferencedLocations: true };
-const ALL_OFF: CleanupOptions = { emptyNotes: false, rangelessHighlights: false, duplicateHighlights: false, unusedMedia: false, unreferencedLocations: false };
+const ALL_ON: CleanupOptions = { emptyNotes: true, emptyPlaylists: true, rangelessHighlights: true, duplicateHighlights: true, unusedMedia: true, unreferencedLocations: true };
+const ALL_OFF: CleanupOptions = { emptyNotes: false, emptyPlaylists: false, rangelessHighlights: false, duplicateHighlights: false, unusedMedia: false, unreferencedLocations: false };
 
 function spec(): FixtureSpec {
   return {
@@ -32,7 +32,7 @@ function spec(): FixtureSpec {
         R.note({ NoteId: 4, Guid: 'n4', LocationId: 1, UserMarkId: 2, Content: 'on the duplicate copy' }),
         R.note({ NoteId: 5, Guid: 'n5', LocationId: 4, Content: '' }), // empty and untagged; only reference to location 4
       ],
-      Tag: [R.tag(1, 1, 'T'), R.playlistTag(2, 'P')],
+      Tag: [R.tag(1, 1, 'T'), R.playlistTag(2, 'P'), R.playlistTag(3, 'Empty playlist'), R.tag(4, 1, 'Unused tag')],
       TagMap: [R.tagMap({ TagMapId: 1, TagId: 1, NoteId: 3, Position: 0 }), R.tagMap({ TagMapId: 2, TagId: 2, PlaylistItemId: 1, Position: 0 })],
       IndependentMedia: [R.media({ IndependentMediaId: 1, FilePath: USED, Hash: 'h1' }), R.media({ IndependentMediaId: 2, FilePath: UNUSED, Hash: 'h2' })],
       PlaylistItemAccuracy: [R.accuracy(1, 'Accurate')],
@@ -49,6 +49,7 @@ describe('clean-ups on the merged result', () => {
     const { tables, counts } = run.result;
     expect(run.cleanup).toMatchObject({
       emptyNotes: 0,
+      emptyPlaylists: 0,
       rangelessHighlights: 1,
       notesDetached: 1,
       duplicateHighlights: 1,
@@ -62,6 +63,7 @@ describe('clean-ups on the merged result', () => {
     expect(counts.BlockRange).toBe(2);
     expect(counts.Note).toBe(5);
     expect(counts.IndependentMedia).toBe(1);
+    expect(counts.Tag).toBe(4); // empty playlists are only removed on request
     expect(tables.UserMark.map((u) => u.UserMarkGuid).sort()).toEqual(['a', 'c']);
     const keeper = tables.UserMark.find((u) => u.UserMarkGuid === 'a')!;
     const byGuid = (g: string) => tables.Note.find((n) => n.Guid === g)!;
@@ -86,6 +88,17 @@ describe('clean-ups on the merged result', () => {
     expect(run.result.tables.Note.some((n) => n.Guid === 'n5')).toBe(false);
     expect(run.result.counts.Location).toBe(2);
     expect(run.result.counts.TagMap).toBe(2); // the tagged empty note keeps its tag
+    await assertDatabaseSound(run);
+    await assertReopenSanity(run);
+  });
+
+  it('removing empty playlists drops only playlists without items and leaves tags alone', async () => {
+    const run = await runMerge([spec()], new Map(), undefined, { ...ALL_OFF, emptyPlaylists: true });
+    expect(run.cleanup?.emptyPlaylists).toBe(1);
+    expect(run.cleanup?.removed).toEqual({ Tag: 1 });
+    expect(run.result.tables.Tag.map((g) => g.Name).sort()).toEqual(['P', 'T', 'Unused tag']); // an unused regular tag is not a playlist
+    expect(run.result.counts.TagMap).toBe(2);
+    expect(run.archive.validation.rowCounts.find((r) => r.table === 'Tag')).toMatchObject({ removed: 1, ok: true });
     await assertDatabaseSound(run);
     await assertReopenSanity(run);
   });

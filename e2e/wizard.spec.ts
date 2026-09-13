@@ -58,10 +58,20 @@ test('merges two backups with a note conflict, end to end', async ({ page }) => 
   // phone-only + tablet-only + both versions of the shared note
   await expect(page.locator('.tile', { hasText: 'Notes' })).toContainText('4');
 
+  // The empty-playlist clean-up is opt-in: off by default, and the tiles follow the toggle.
+  const playlistsTile = page.locator('.tile', { hasText: 'Playlists' });
+  const emptyPlaylists = page.locator('.cleanup', { hasText: 'Remove empty playlists' });
+  await expect(emptyPlaylists).toContainText('1 found');
+  await expect(playlistsTile).toContainText('1');
+  await emptyPlaylists.getByRole('switch').click();
+  await expect(emptyPlaylists).toContainText('−1');
+  await expect(playlistsTile).toContainText('0');
+
   await page.getByRole('button', { name: 'Build merged backup' }).click();
   await expect(page.getByText('Re-open test')).toBeVisible();
   await expect(page.getByText('every reference resolves')).toBeVisible();
   await expect(page.getByText('Do not restore this file')).toHaveCount(0);
+  await expect(page.getByText(/Clean-up removed .*1 empty playlist/)).toBeVisible();
 
   const link = page.locator('a[download]');
   await expect(link).toHaveAttribute('download', /^UserdataBackup_.*_Merged\.jwlibrary$/);

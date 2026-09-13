@@ -13,7 +13,7 @@ export const FIXTURE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)
 export interface E2eFixtures {
   /** Older edit of the shared note, plus one note of its own and one highlight. */
   phone: string;
-  /** Newer edit of the shared note (the suggested winner), plus one tagged note of its own. */
+  /** Newer edit of the shared note (the suggested winner), one tagged note of its own and an empty playlist. */
   tablet: string;
 }
 
@@ -43,7 +43,7 @@ export async function writeFixtures(): Promise<E2eFixtures> {
         R.note({ NoteId: 1, Guid: 'shared-note', LocationId: 1, Title: 'Born again', Content: 'Second thoughts on the chapter, expanded', LastModified: '2026-09-04T10:00:00Z' }),
         R.note({ NoteId: 2, Guid: 'tablet-only', LocationId: 2, Title: 'Sermon', Content: 'Only on the tablet' }),
       ],
-      Tag: [R.tag(1, 1, 'Favourites')],
+      Tag: [R.tag(1, 1, 'Favourites'), R.playlistTag(2, 'Empty list')],
       TagMap: [R.tagMap({ TagMapId: 1, TagId: 1, NoteId: 2, Position: 0 })],
     },
   });

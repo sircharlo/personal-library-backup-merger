@@ -97,11 +97,11 @@ describe('health check', () => {
     const counts = Object.fromEntries(report.findings.map((f) => [f.code, f.count]));
     expect(counts).toEqual({
       A1: 1, A2: 1, A3: 1, A4: 1, A5: 1, A6: 0, A7: 1, A8: 1, A9: 0, A10: 0, A11: 1, A12: 0, A13: 0, A14: 0, A15: 0, A16: 0, A17: 0,
-      B1: 1, B2: 1, B3: 1, B4: 2, B5: 1, B6: 1, B7: 1, B8: 1,
+      B1: 1, B2: 1, B3: 1, B4: 2, B5: 1, B6: 1, B7: 1, B8: 1, B9: 0,
       C1: 1, C2: 1, C3: 1, C4: 1, C5: 2, C6: 0,
       D1: 1, D2: 1,
     });
-    expect(report.checks).toBe(33);
+    expect(report.checks).toBe(34);
     expect(report.problemCount).toBe(16);
     for (const f of report.findings) expect(f.samples.length).toBe(Math.min(f.count, 8));
     // Samples describe rows, never note text.
@@ -122,7 +122,7 @@ describe('health check', () => {
   it('skips the archive checks when no file list is given', () => {
     const report = checkHealth({ ...emptyTables() });
     expect(report.findings.some((f) => f.code.startsWith('D'))).toBe(false);
-    expect(report.checks).toBe(31);
+    expect(report.checks).toBe(32);
   });
 });
 

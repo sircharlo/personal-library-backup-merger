@@ -113,6 +113,39 @@ describe('robustness', () => {
     expect(run.result.tables.TagMap.map((t) => t.Position).sort()).toEqual([0, 1]);
   });
 
+  it('still validates when the largest source is the one carrying the broken tag assignments', async () => {
+    // Shaped after the real iPad/iPhone backups of 2026-09-13: TagMap rows pointing at playlist items the
+    // backup does not contain at all (plus some at deleted notes) make that source the largest by raw count,
+    // yet nothing of it can be carried over beyond what the other source already has.
+    const run = await runMerge([
+      {
+        deviceName: 'Desktop',
+        rows: { Note: [R.note({ NoteId: 1, Guid: 'kept', Content: 'kept' })], Tag: [R.tag(1, 1, 'Study'), R.playlistTag(2, 'Talks')], TagMap: [R.tagMap({ TagMapId: 1, TagId: 1, NoteId: 1, Position: 0 })] },
+      },
+      {
+        deviceName: 'iPad',
+        allowDanglingRefs: true,
+        rows: {
+          Note: [R.note({ NoteId: 7, Guid: 'kept', Content: 'kept' })],
+          Tag: [R.tag(3, 1, 'Study'), R.playlistTag(4, 'Talks')],
+          TagMap: [
+            R.tagMap({ TagMapId: 10, TagId: 3, NoteId: 7, Position: 0 }),
+            R.tagMap({ TagMapId: 11, TagId: 4, PlaylistItemId: 501, Position: 0 }), // this backup has no PlaylistItem rows at all
+            R.tagMap({ TagMapId: 12, TagId: 4, PlaylistItemId: 502, Position: 1 }),
+            R.tagMap({ TagMapId: 13, TagId: 3, NoteId: 999, Position: 1 }), // deleted note
+          ],
+        },
+      },
+    ]);
+    expect(run.analysis.sourceCounts.map((c) => c.TagMap)).toEqual([1, 4]);
+    expect(run.analysis.droppedCounts.map((c) => c.TagMap)).toEqual([0, 3]);
+    expect(run.analysis.warnings).toHaveLength(3);
+    expect(run.result.counts.TagMap).toBe(1);
+    expect(run.archive.validation.rowCounts.find((r) => r.table === 'TagMap')).toMatchObject({ final: 1, maxSource: 4, maxCarried: 1, removed: 0, ok: true });
+    expect(run.archive.validation.errors).toEqual([]);
+    expect(run.archive.validation.ok).toBe(true);
+  });
+
   it('flags a highlight whose ranges differ as a conflict, and pairs identical ranges otherwise', async () => {
     const mk = (ids: number[]) => ({
       Location: [R.bibleLoc(1, 1, 1)],

@@ -88,6 +88,7 @@ const keptBothCount = computed(() => conflicts.value.filter((c) => resolutions.v
 const mergedHealth = computed(() => analysis.value?.mergedHealth ?? null);
 const CLEANUP_TABLE: Record<CleanupKey, DataTableName> = {
   emptyNotes: 'Note',
+  emptyPlaylists: 'Tag',
   rangelessHighlights: 'UserMark',
   duplicateHighlights: 'UserMark',
   unusedMedia: 'IndependentMedia',
@@ -114,6 +115,12 @@ const displayCounts = computed<TableCounts | null>(() => {
 const displayMediaCount = computed(() => {
   const base = analysis.value?.mediaFileCount ?? 0;
   return cleanups.value.unusedMedia ? Math.max(0, base - (findingByCleanup(mergedHealth.value, 'unusedMedia')?.count ?? 0)) : base;
+});
+/** Playlist count after the empty-playlist clean-up: what the last build removed, else what the current toggle would remove. */
+const displayPlaylistCount = computed(() => {
+  const base = analysis.value?.playlistCount ?? 0;
+  const predicted = cleanups.value.emptyPlaylists ? (findingByCleanup(mergedHealth.value, 'emptyPlaylists')?.count ?? 0) : 0;
+  return Math.max(0, base - (archive.value ? archive.value.cleanup.emptyPlaylists : predicted));
 });
 const stepIndex = computed(() => STEP_ORDER.indexOf(step.value) + 1);
 const parsedFiles = computed(() => files.value.filter((f) => f.status === 'ok'));
@@ -431,6 +438,7 @@ export function useMergeWizard() {
     keptBothCount,
     displayCounts,
     displayMediaCount,
+    displayPlaylistCount,
     mergedHealth,
     cleanups,
     parsedFiles,

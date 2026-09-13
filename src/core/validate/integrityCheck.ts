@@ -5,11 +5,17 @@ import { DATA_TABLE_NAMES, type DataTableName, type TableCounts } from '../jwlib
 export interface RowCountCheck {
   table: DataTableName;
   final: number;
+  /** Largest raw row count among the sources. */
   maxSource: number;
+  /**
+   * Largest number of rows any single source can actually contribute: its count minus the rows that were
+   * already broken in that backup and deliberately left out at analysis (each one warned about).
+   */
+  maxCarried: number;
   sumSource: number;
   /** Rows intentionally removed by clean-ups (lowers the bound below). */
   removed: number;
-  /** `max(sourceCounts) - removed <= final <= sum(sourceCounts)` */
+  /** `maxCarried - removed <= final <= sum(sourceCounts)` */
   ok: boolean;
 }
 
@@ -52,12 +58,16 @@ export function readTableCounts(db: Database): TableCounts {
 /**
  * `PRAGMA foreign_key_check` (zero rows), `PRAGMA integrity_check` ('ok'), per-table row-count
  * reconciliation against the sources, then export → re-open → re-run both pragmas + spot-check counts.
+ *
+ * `dropped[i]` holds, per table, the rows of source `i` the merge left out because they were already
+ * broken in that backup (e.g. a tag assignment whose note or playlist item no longer exists there).
  */
 export async function validateDatabaseBytes(
   dbBytes: Uint8Array,
   sourceCounts: TableCounts[],
   expectedCounts?: TableCounts,
   removed: Partial<TableCounts> = {},
+  dropped: Partial<TableCounts>[] = [],
 ): Promise<ValidationReport> {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -79,20 +89,26 @@ export async function validateDatabaseBytes(
 
   const rowCounts: RowCountCheck[] = DATA_TABLE_NAMES.map((table) => {
     const counts = sourceCounts.map((c) => c[table] ?? 0);
+    const carried = counts.map((n, i) => Math.max(0, n - (dropped[i]?.[table] ?? 0)));
     const maxSource = counts.length ? Math.max(...counts) : 0;
+    const maxCarried = carried.length ? Math.max(...carried) : 0;
     const sumSource = counts.reduce((a, b) => a + b, 0);
     const final = finalCounts[table];
     const removedHere = removed[table] ?? 0;
     const upperOk = final <= sumSource;
-    const lowerOk = final >= maxSource - removedHere;
+    const lowerOk = final >= maxCarried - removedHere;
     if (!upperOk) errors.push(`${table}: merged count ${final} exceeds the sum of the sources (${sumSource}).`);
     if (!lowerOk) {
-      const msg = `${table}: merged count ${final} is below the largest source (${maxSource})${removedHere ? ` minus the ${removedHere} row(s) removed by clean-up` : ''}.`;
+      const bound =
+        maxCarried === maxSource
+          ? `the largest source (${maxSource})`
+          : `the ${maxCarried} row(s) the largest source can contribute (${maxSource} in that backup, the rest already broken there and left out)`;
+      const msg = `${table}: merged count ${final} is below ${bound}${removedHere ? ` minus the ${removedHere} row(s) removed by clean-up` : ''}.`;
       if (LOWER_BOUND_SOFT_TABLES.has(table)) warnings.push(msg + ' (expected when a highlight conflict winner has fewer ranges)');
       else errors.push(msg);
     }
     if (expectedCounts && expectedCounts[table] !== final) errors.push(`${table}: database holds ${final} rows but the merge produced ${expectedCounts[table]}.`);
-    return { table, final, maxSource, sumSource, removed: removedHere, ok: upperOk && (lowerOk || LOWER_BOUND_SOFT_TABLES.has(table)) };
+    return { table, final, maxSource, maxCarried, sumSource, removed: removedHere, ok: upperOk && (lowerOk || LOWER_BOUND_SOFT_TABLES.has(table)) };
   });
 
   const reopened = await openDatabase(reexported);

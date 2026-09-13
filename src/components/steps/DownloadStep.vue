@@ -14,6 +14,7 @@ const {
   keptBothCount,
   displayCounts,
   displayMediaCount,
+  displayPlaylistCount,
   mergedHealth,
   cleanups,
   hasConflicts,
@@ -34,6 +35,7 @@ const CLEANUPS: { key: CleanupKey; label: string; desc: string }[] = [
   { key: 'unusedMedia', label: 'Drop media used by no playlist item', desc: 'Shrinks the backup; nothing in the app refers to these files.' },
   { key: 'rangelessHighlights', label: 'Remove invisible highlights', desc: 'Highlights without a highlighted range; their notes stay on the location.' },
   { key: 'emptyNotes', label: 'Remove empty, untagged notes', desc: 'No title, no content and no tag. Tagged empty notes are kept (a tag used as a bookmark). Off by default.' },
+  { key: 'emptyPlaylists', label: 'Remove empty playlists', desc: 'Playlists that contain no items. Regular tags are never touched. Off by default.' },
 ];
 const cleanupRows = computed(() => CLEANUPS.map((c) => ({ ...c, count: findingByCleanup(mergedHealth.value, c.key)?.count ?? 0 })));
 
@@ -46,6 +48,7 @@ const cleanupLine = computed(() => {
   if (c.unusedMedia) parts.push(plural(c.unusedMedia, 'unused media file'));
   if (c.rangelessHighlights) parts.push(`${plural(c.rangelessHighlights, 'invisible highlight')}${c.notesDetached ? ` (${plural(c.notesDetached, 'note')} kept on the location)` : ''}`);
   if (c.emptyNotes) parts.push(plural(c.emptyNotes, 'empty note'));
+  if (c.emptyPlaylists) parts.push(plural(c.emptyPlaylists, 'empty playlist'));
   return parts.join(' · ');
 });
 
@@ -67,8 +70,8 @@ const tiles = computed(() => {
     { icon: I.stickyNote2, label: 'Notes', n: c.Note },
     { icon: I.formatInkHighlighter, label: 'Highlights', n: c.UserMark },
     { icon: I.bookmark, label: 'Bookmarks', n: c.Bookmark },
-    { icon: I.label, label: 'Tags', n: Math.max(0, c.Tag - a.playlistCount) },
-    { icon: I.playlistPlay, label: 'Playlists', n: a.playlistCount },
+    { icon: I.label, label: 'Tags', n: Math.max(0, c.Tag - displayPlaylistCount.value) },
+    { icon: I.playlistPlay, label: 'Playlists', n: displayPlaylistCount.value },
     { icon: I.queueMusic, label: 'Playlist items', n: c.PlaylistItem },
     { icon: I.permMedia, label: 'Media files', n: archive.value?.mediaFileCount ?? displayMediaCount.value },
     { icon: I.editNote, label: 'Input fields', n: c.InputField },
